@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+  echo "Usage: start_synced <existing_datadir_path>"
+  exit 1
+fi
+
+~/src/bitcoin/src/bitcoind -datadir="$1" -printtoconsole \
+  -rpcuser=foo -rpcpassword=bar -port=9000 -rpcport=9001 -noconnect -listen=1 \
+  -maxtipage=9999999999999
