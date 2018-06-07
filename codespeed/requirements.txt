@@ -1,3 +1,4 @@
 git+git://github.com/chaincodelabs/codespeed@master#egg=codespeed
 whitenoise
 uwsgi
+requests
