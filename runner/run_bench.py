@@ -97,22 +97,28 @@ def run_benches():
     if CHECKOUT_COMMIT:
         _run(f"git checkout {CHECKOUT_COMMIT}")
 
+    RUN_DATA.current_commit = subprocess.check_output(
+        shlex.split('git rev-parse HEAD')).strip()
+
     if _shouldrun('build'):
         _run(f"./contrib/install_db4.sh .")
 
         my_env = os.environ.copy()
         my_env['BDB_PREFIX'] = f"{workdir}/bitcoin/db4"
 
-        with timer("build"):
-            _run(f"./autogen.sh")
-            _run(
-                './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-                'BDB_CFLAGS="-I${BDB_PREFIX}/include"', env=my_env)
-            with timer(f"build.make.{NPROC - 1}"):
-                _run(f'make -j {NPROC - 1}')
+        _run(f"./autogen.sh")
+        _run(
+            './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
+            'BDB_CFLAGS="-I${BDB_PREFIX}/include"', env=my_env)
+        _try_execute_and_report_time(
+            f"build.make.{NPROC - 1}", f'make -j {NPROC - 1}',
+            executable='make')
 
-    RUN_DATA.current_commit = subprocess.check_output(
-        shlex.split('git rev-parse HEAD')).strip()
+    if _shouldrun('build-mem-usage'):
+        _run(f"make clean")
+        _try_execute_and_report_mem(
+            f'make.1.mem-usage', f"make -j 1",
+            executable='make')
 
     if _shouldrun('makecheck'):
         _try_execute_and_report_time(
@@ -201,6 +207,43 @@ def _shouldrun(bench_name):
 
     return should
 
+def _try_execute_and_report_mem(
+        bench_name, cmd, num_tries=1, check_returncode=True,
+        executable='bitcoind'):
+    """
+    Attempt to execute some command a number of times and then report
+    its execution memory usage to codespeed over HTTP.
+    """
+    for i in range(num_tries):
+        ps = _popen('$(which time) -f %M ' + cmd)
+
+        logger.info("[%s] command '%s' starting", bench_name, cmd)
+
+        (stdout, stderr) = ps.communicate()
+        stdout = stdout.decode()[:100000]
+        stderr = stderr.decode()[:100000]
+
+        if (check_returncode and ps.returncode != 0) \
+                or check_for_failure(bench_name, stdout, stderr, total_time_secs=0):
+            logger.error(
+                "[%s] command '%s' failed\nstdout:\n%s\nstderr:\n%s",
+                bench_name, cmd, stdout, stderr)
+
+            if i == (num_tries - 1):
+                return False
+            continue
+        else:
+            # Command succeeded
+            break
+
+    memusage = int(stderr.strip().split('\n')[-1])
+
+    logger.info(
+        "[%s] command '%s' finished successfully with maximum resident set size %.3f kB",
+        bench_name, cmd, memusage)
+
+    NAME_TO_TIME[bench_name].append(memusage)
+    send_to_codespeed(bench_name, memusage, executable=executable)
 
 def _try_execute_and_report_time(
         bench_name, cmd, num_tries=1, check_returncode=True,
