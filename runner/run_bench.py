@@ -36,7 +36,7 @@ logger = _get_logger()
 REPO_LOCATION = os.environ.get(
     'REPO_LOCATION', 'https://github.com/bitcoin/bitcoin.git')
 REPO_BRANCH = os.environ.get('REPO_BRANCH', 'master')
-CODESPEED_URL = os.environ.get('CODESPEED_URL', 'http://codespeed:8000')
+CODESPEED_URL = os.environ.get('CODESPEED_URL', 'http://localhost:8000')
 IBD_PEER_ADDRESS = os.environ.get('IBD_PEER_ADDRESS', '')
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
 CODESPEED_USER = os.environ['CODESPEED_USER']

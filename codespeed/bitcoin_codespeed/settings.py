@@ -40,6 +40,7 @@ ADMIN_MEDIA_PREFIX = '/static/admin/'
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'changeme')
 
 MIDDLEWARE_CLASSES = (
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
