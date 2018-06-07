@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Assuming Debian 9
+
+sudo apt install -y git python3-pip python3-venv nginx
+git clone https://github.com/chaincodelabs/bitcoin-perfmonitor
+cd bitcoin-perfmonitor
+python3 -m venv venv
+source ./venv/bin/activate
+cd codespeed
+pip install -r requirements.txt
+
+sudo cat >/etc/nginx/sites-enabled/codespeed <<EOL
+upstream django {
+    server 127.0.0.1:8000;
+}
+
+# configuration of the server
+server {
+    listen      80;
+    server_name bench.chaincode.com; 
+    charset     utf-8;
+
+    client_max_body_size 2M;
+
+    location / {
+        uwsgi_pass django;
+        include uwsgi_params;
+    }
+}
+EOL
