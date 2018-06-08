@@ -109,7 +109,11 @@ def run_benches():
         _run(f"./autogen.sh")
         _run(
             './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-            'BDB_CFLAGS="-I${BDB_PREFIX}/include"', env=my_env)
+            'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
+            # Ensure ccache is disabled so that subsequent make runs are
+            # timed accurately.
+            '--disable-ccache',
+            env=my_env)
         _try_execute_and_report_time(
             f"build.make.{NPROC - 1}", f'make -j {NPROC - 1}',
             executable='make')
