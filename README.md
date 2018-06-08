@@ -27,7 +27,7 @@ The benchmarks which are monitored are
 0. `cd codespeed && pip install --user -r requirements.txt`
 0. Initialize the codespeed DB: `python manage.py migrate`
 0. Create an admin user (for posting results): `python manage.py createsuperuser`
-   - If you want ./bin/run_bench to work unmodified, use credentials
+   - If you want `./bin/run_bench` to work unmodified, use credentials
      `root/foobar00`.
 0. Load required initial data:
    `python manage.py shell < ../bin/initialize_data.py`
