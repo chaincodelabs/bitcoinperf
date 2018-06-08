@@ -59,6 +59,8 @@ WORKING_DIR_NAME = (
 # FIXME reenable this at some point
 # NPROC = int(multiprocessing.cpu_count())
 NPROC = 4
+NPROC = int(os.environ.get('NPROC', str(NPROC)))
+CODESPEED_NO_SEND = bool(os.environ.get('CODESPEED_NO_SEND', ''))
 
 
 NAME_TO_TIME: t.Dict[str, int] = defaultdict(list)
@@ -343,6 +345,9 @@ def send_to_codespeed(bench_name, result,
     logger.debug(
         "Attempting to send benchmark (%s, %s) to codespeed",
         bench_name, result)
+
+    if CODESPEED_NO_SEND:
+        return
 
     resp = requests.post(
         CODESPEED_URL + '/result/add/',
