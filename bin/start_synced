@@ -5,6 +5,10 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-~/src/bitcoin/src/bitcoind -datadir="$1" -printtoconsole \
+# Source a .env file if one exists in this directory
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+[ -f "${DIR}/.env" ] && source "${DIR}/.env"
+
+${BITCOIND_PATH:-~/src/bitcoin/src/bitcoind} -datadir="$1" -printtoconsole \
   -rpcuser=foo -rpcpassword=bar -port=9000 -rpcport=9001 -noconnect -listen=1 \
   -maxtipage=9999999999999
