@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Source a .env file if one exists in this directory
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+[ -f ".env" ] && source .env
+
 if [ "$(hostname)" == "bench-hdd-1" ]; then
   HOSTNAME=ccl-bench-hdd-1
 else
