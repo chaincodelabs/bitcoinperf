@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.6
 """
 Run a series of benchmarks against a particular Bitcoin revision.
 
@@ -207,6 +207,7 @@ def _shouldrun(bench_name):
 
     return should
 
+
 def _try_execute_and_report_mem(
         bench_name, cmd, num_tries=1, check_returncode=True,
         executable='bitcoind'):
@@ -224,7 +225,8 @@ def _try_execute_and_report_mem(
         stderr = stderr.decode()[:100000]
 
         if (check_returncode and ps.returncode != 0) \
-                or check_for_failure(bench_name, stdout, stderr, total_time_secs=0):
+                or check_for_failure(
+                    bench_name, stdout, stderr, total_time_secs=0):
             logger.error(
                 "[%s] command '%s' failed\nstdout:\n%s\nstderr:\n%s",
                 bench_name, cmd, stdout, stderr)
@@ -239,11 +241,13 @@ def _try_execute_and_report_mem(
     memusage = int(stderr.strip().split('\n')[-1])
 
     logger.info(
-        "[%s] command '%s' finished successfully with maximum resident set size %.3f kB",
+        "[%s] command '%s' finished successfully "
+        "with maximum resident set size %.3f kB",
         bench_name, cmd, memusage)
 
     NAME_TO_TIME[bench_name].append(memusage)
     send_to_codespeed(bench_name, memusage, executable=executable)
+
 
 def _try_execute_and_report_time(
         bench_name, cmd, num_tries=1, check_returncode=True,
