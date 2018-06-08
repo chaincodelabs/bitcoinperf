@@ -102,3 +102,6 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Deploy-specific .env file, potentially containing Codespeed credentials.
+bin/.env

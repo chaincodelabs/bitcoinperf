@@ -2,7 +2,7 @@
 
 # Source a .env file if one exists in this directory
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-[ -f ".env" ] && source .env
+[ -f "${DIR}/.env" ] && source "${DIR}/.env"
 
 if [ "$(hostname)" == "bench-hdd-1" ]; then
   HOSTNAME=ccl-bench-hdd-1
@@ -10,10 +10,9 @@ else
   HOSTNAME=unknown
 fi
 
-IBD_PEER_ADDRESS=localhost:9000 \
-  CODESPEED_USER=root \
-  CODESPEED_PASSWORD=foobar00 \
+IBD_PEER_ADDRESS=${IBD_PEER_ADDRESS:-localhost:9000} \
+  CODESPEED_USER=${CODESPEED_USER:-root} \
+  CODESPEED_PASSWORD=${CODESPEED_PASSWORD:-foobar00} \
   CODESPEED_ENV_NAME="$HOSTNAME" \
-  CODESPEED_URL=http://localhost:8000 \
-  BITCOIND_STOPATHEIGHT=100000 \
+  CODESPEED_URL=${CODESPEED_URL:-http://localhost:8000} \
   ./runner/run_bench.py
