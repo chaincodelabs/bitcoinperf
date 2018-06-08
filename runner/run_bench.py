@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.6
 """
-Run a series of benchmarks against a particular Bitcoin revision.
+Run a series of benchmarks against a particular Bitcoin Core revision.
 
 See bin/run_bench for a sample invocation.
 """
@@ -326,7 +326,7 @@ def send_to_codespeed(bench_name, result,
     data = {
         'commitid': RUN_DATA.current_commit,
         'branch': REPO_BRANCH,
-        'project': 'Bitcoin',
+        'project': 'Bitcoin Core',
         'executable': executable,
         'benchmark': bench_name,
         'environment': CODESPEED_ENV_NAME,

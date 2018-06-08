@@ -1,7 +1,7 @@
 from codespeed.models import Project, Environment
 
 Project.objects.get_or_create(
-    name='Bitcoin',
+    name='Bitcoin Core',
     defaults=dict(
         repo_type=Project.GIT,
         repo_path='https://github.com/bitcoin/bitcoin',
