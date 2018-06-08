@@ -1,10 +1,10 @@
-## Bitcoin performance monitor 📈
+## Bitcoin Core performance monitor 📈
 
 This repository consists of two components
 
 - a [codespeed](https://github.com/chaincodelabs/codespeed) installation which
   collects and presents benchmarking results in a web interface, and
-- a haphazard Python script for running high-level Bitcoin benchmarks which
+- a haphazard Python script for running high-level Bitcoin Core benchmarks which
   POSTs results to codespeed.
 
 The benchmarks which are monitored are
@@ -19,7 +19,7 @@ The benchmarks which are monitored are
 
 ### Installation
 
-0. Obtain all the dependencies necessary to build bitcoin. Obtain an up-to-date
+0. Obtain all the dependencies necessary to build Bitcoin Core. Obtain an up-to-date
    copy of the chain at some `$datadir` location.
 
 #### Starting codespeed
