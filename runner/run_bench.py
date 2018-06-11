@@ -32,7 +32,7 @@ def _get_logger():
     sh.setFormatter(logging.Formatter(
         '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
 
-    slack = logging.SlackLogHandler()
+    slack = SlackLogHandler()
     slack.setLevel('INFO')
     slack.setFormatter(logging.Formatter(
         '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
