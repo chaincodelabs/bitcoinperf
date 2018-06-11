@@ -193,6 +193,10 @@ def run_benches():
         send_slack_msg(
             f"Finished reindex ({RUN_DATA.current_commit})")
 
+    os.chdir(workdir / "..")
+    # Clean up to avoid filling disk
+    _run(f"rm -rf {workdir}")
+
 
 def _create_working_dir():
     if not os.path.exists(WORKING_DIR_NAME):
