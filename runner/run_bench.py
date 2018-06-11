@@ -99,6 +99,8 @@ def run_benches():
 
     RUN_DATA.current_commit = subprocess.check_output(
         shlex.split('git rev-parse HEAD')).strip()
+    send_slack_msg(
+        f"Starting benchmark for {REPO_BRANCH} ({RUN_DATA.current_commit})")
 
     if _shouldrun('build'):
         _run(f"./contrib/install_db4.sh .")
@@ -121,7 +123,7 @@ def run_benches():
     if _shouldrun('build-mem-usage'):
         _run(f"make clean")
         _try_execute_and_report_mem(
-            f'make.1.mem-usage', f"make -j 1",
+            f'build.make.1.mem-usage', f"make -j 1",
             executable='make')
 
     if _shouldrun('makecheck'):
@@ -154,7 +156,8 @@ def run_benches():
                 line[0], line[-1], line[-2], line[-3])
             assert(max_ >= median >= min_)
             send_to_codespeed(
-                bench, median, max_, min_, executable='bench-bitcoin')
+                f"micro.{bench}",
+                median, max_, min_, executable='bench-bitcoin')
 
     datadir = workdir / 'bitcoin' / 'data'
     _run(f"rm -rf {datadir}", check_returncode=False)
@@ -167,14 +170,26 @@ def run_benches():
         f'-port={BITCOIND_PORT} -rpcport={BITCOIND_RPCPORT}')
 
     if _shouldrun('ibd'):
+        send_slack_msg(
+            f"Starting IBD for {REPO_BRANCH} ({RUN_DATA.current_commit})")
+
         _try_execute_and_report_time(
             f'ibd.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
             f'{run_bitcoind_cmd} -addnode={IBD_PEER_ADDRESS}')
 
+        send_slack_msg(
+            f"Finished IBD ({RUN_DATA.current_commit})")
+
     if _shouldrun('reindex'):
+        send_slack_msg(
+            f"Starting reindex for {REPO_BRANCH} ({RUN_DATA.current_commit})")
+
         _try_execute_and_report_time(
             f'reindex.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
             f'{run_bitcoind_cmd} -reindex')
+
+        send_slack_msg(
+            f"Finished reindex ({RUN_DATA.current_commit})")
 
 
 def _create_working_dir():
@@ -356,6 +371,9 @@ def send_to_codespeed(bench_name, result,
 
 
 def send_slack_msg(txt):
+    if not SLACK_WEBHOOK_URL:
+        return
+
     slack_data = {'text': txt}
 
     response = requests.post(
