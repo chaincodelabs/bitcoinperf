@@ -20,13 +20,25 @@ from collections import defaultdict
 from pathlib import Path
 
 
+class SlackLogHandler(logging.Handler):
+    def emit(self, record):
+        return send_slack_msg(self.format(record))
+
+
 def _get_logger():
     logger = logging.getLogger(__name__)
     sh = logging.StreamHandler(sys.stdout)
     sh.setLevel(os.environ.get('LOG_LEVEL', 'DEBUG'))
     sh.setFormatter(logging.Formatter(
         '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
+
+    slack = logging.SlackLogHandler()
+    slack.setLevel('INFO')
+    slack.setFormatter(logging.Formatter(
+        '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
+
     logger.addHandler(sh)
+    logger.addHandler(slack)
     logger.setLevel('DEBUG')
     return logger
 
