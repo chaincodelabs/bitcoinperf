@@ -154,7 +154,9 @@ def run_benches():
             assert(len(line) == 7)
             (bench, median, max_, min_) = (
                 line[0], line[-1], line[-2], line[-3])
-            assert(max_ >= median >= min_)
+            if not (max_ >= median >= min_):
+                logger.warning(
+                    f"{bench} has weird results: {max_}, {median}, {min_}")
             send_to_codespeed(
                 f"micro.{bench}",
                 median, max_, min_, executable='bench-bitcoin')
