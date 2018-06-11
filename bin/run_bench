@@ -4,6 +4,9 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 [ -f "${DIR}/.env" ] && source "${DIR}/.env"
 
+# Source the virtualenv if one is present
+[ -d "${DIR}/../venv" ] && source "${DIR}/../venv/bin/activate"
+
 if [ "$(hostname)" == "bench-hdd-1" ]; then
   HOSTNAME=ccl-bench-hdd-1
 else
