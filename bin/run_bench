@@ -15,4 +15,4 @@ IBD_PEER_ADDRESS=${IBD_PEER_ADDRESS:-localhost:9000} \
   CODESPEED_PASSWORD=${CODESPEED_PASSWORD:-foobar00} \
   CODESPEED_ENV_NAME="$HOSTNAME" \
   CODESPEED_URL=${CODESPEED_URL:-http://localhost:8000} \
-  ./runner/run_bench.py
+  "${DIR}/../runner/run_bench.py"
