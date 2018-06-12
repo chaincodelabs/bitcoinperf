@@ -8,6 +8,7 @@ See bin/run_bench for a sample invocation.
 import atexit
 import os
 import subprocess
+import tempfile
 import json
 import datetime
 import contextlib
@@ -65,10 +66,6 @@ BITCOIND_STOPATHEIGHT = os.environ.get('BITCOIND_STOPATHEIGHT', '522000')
 BITCOIND_PORT = os.environ.get('BITCOIND_PORT', '9003')
 BITCOIND_RPCPORT = os.environ.get('BITCOIND_RPCPORT', '9004')
 
-WORKING_DIR_NAME = (
-    f"/tmp/bench-{REPO_BRANCH}-"
-    f"{datetime.datetime.utcnow().strftime('%Y-%m-%d')}")
-
 # FIXME reenable this at some point
 # NPROC = int(multiprocessing.cpu_count())
 NPROC = 4
@@ -112,14 +109,15 @@ def run_benches():
         logger.error(f"Couldn't acquire lockfile {LOCKFILE_PATH}; exiting")
         sys.exit(1)
 
-    workdir: Path = _create_working_dir()
+    workdir = Path(tempfile.mkdtemp(prefix=
+        f"bench-{REPO_BRANCH}-"
+        f"{datetime.datetime.utcnow().strftime('%Y-%m-%d')}-"))
     RUN_DATA.workdir = workdir
 
     os.chdir(workdir)
 
     if _shouldrun('gitclone'):
         with timer("gitclone"):
-            _run(f"rm -rf {workdir / 'bitcoin'}")
             _run(f"git clone -b {REPO_BRANCH} {REPO_LOCATION}")
 
     os.chdir(workdir / 'bitcoin')
@@ -242,12 +240,6 @@ def _clean_shutdown():
 atexit.register(_clean_shutdown)
 
 
-def _create_working_dir():
-    if not os.path.exists(WORKING_DIR_NAME):
-        os.mkdir(WORKING_DIR_NAME)
-    return Path(WORKING_DIR_NAME)
-
-
 def _run(*args, check_returncode=True, **kwargs) -> (bytes, bytes, int):
     p = subprocess.Popen(
         *args, **kwargs,
@@ -337,7 +329,7 @@ def check_for_failure(bench_name, stdout, stderr, total_time_secs):
     """
     if bench_name in ('ibd', 'reindex'):
         disk_warning_ps = subprocess.run(
-            f"tail -n 10000 {WORKING_DIR_NAME}/bitcoin/data/debug.log | "
+            f"tail -n 10000 {RUN_DATA.workdir}/bitcoin/data/debug.log | "
             "grep 'Disk space is low!'")
 
         if disk_warning_ps.returncode == 0:
