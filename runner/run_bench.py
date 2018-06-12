@@ -130,27 +130,21 @@ def run_benches():
             # timed accurately.
             '--disable-ccache',
             env=my_env)
-        _try_execute_and_report_time(
-            f"build.make.{NPROC - 1}", f'make -j {NPROC - 1}',
-            executable='make')
-
-    if _shouldrun('build-mem-usage'):
-        _run(f"make clean")
-        _try_execute_and_report_mem(
-            f'build.make.1.mem-usage', f"make -j 1",
+        _try_execute_and_report(
+            f'build.make.1', f"make -j 1",
             executable='make')
 
     if _shouldrun('makecheck'):
-        _try_execute_and_report_time(
-            f'makecheck.{NPROC - 1}', f"make -j {NPROC - 1} check", 3,
+        _try_execute_and_report(
+            f'makecheck.{NPROC - 1}', f"make -j {NPROC - 1} check", num_tries=3,
             # make check seems to return non-zero exit codes even when it has
             # succeeded.
             check_returncode=False,
             executable='make')
 
     if _shouldrun('functionaltests'):
-        _try_execute_and_report_time(
-            'functionaltests', f"./test/functional/test_runner.py", 3,
+        _try_execute_and_report(
+            'functionaltests', f"./test/functional/test_runner.py", num_tries=3,
             executable='functional-test-runner')
 
     if _shouldrun('microbench'):
@@ -189,7 +183,7 @@ def run_benches():
         send_slack_msg(
             f"Starting IBD for {REPO_BRANCH} ({RUN_DATA.current_commit})")
 
-        _try_execute_and_report_time(
+        _try_execute_and_report(
             f'ibd.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
             f'{run_bitcoind_cmd} -addnode={IBD_PEER_ADDRESS}')
 
@@ -200,7 +194,7 @@ def run_benches():
         send_slack_msg(
             f"Starting reindex for {REPO_BRANCH} ({RUN_DATA.current_commit})")
 
-        _try_execute_and_report_time(
+        _try_execute_and_report(
             f'reindex.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
             f'{run_bitcoind_cmd} -reindex')
 
@@ -247,25 +241,27 @@ def _shouldrun(bench_name):
     return should
 
 
-def _try_execute_and_report_mem(
-        bench_name, cmd, num_tries=1, check_returncode=True,
+def _try_execute_and_report(
+        bench_name, cmd, *, report_memory=True, report_time=True, num_tries=1, check_returncode=True,
         executable='bitcoind'):
     """
     Attempt to execute some command a number of times and then report
-    its execution memory usage to codespeed over HTTP.
+    its execution memory usage or execution time to codespeed over HTTP.
     """
     for i in range(num_tries):
+        start = time.time()
         ps = _popen('$(which time) -f %M ' + cmd)
 
         logger.info("[%s] command '%s' starting", bench_name, cmd)
 
         (stdout, stderr) = ps.communicate()
+        total_time = time.time() - start
         stdout = stdout.decode()[:100000]
         stderr = stderr.decode()[:100000]
 
         if (check_returncode and ps.returncode != 0) \
                 or check_for_failure(
-                    bench_name, stdout, stderr, total_time_secs=0):
+                    bench_name, stdout, stderr, total_time_secs=total_time):
             logger.error(
                 "[%s] command '%s' failed\nstdout:\n%s\nstderr:\n%s",
                 bench_name, cmd, stdout, stderr)
@@ -281,50 +277,20 @@ def _try_execute_and_report_mem(
 
     logger.info(
         "[%s] command '%s' finished successfully "
-        "with maximum resident set size %.3f kB",
-        bench_name, cmd, memusage)
+        "with maximum resident set size %.3f MiB",
+        bench_name, cmd, memusage / 1024)
 
-    NAME_TO_TIME[bench_name].append(memusage)
-    send_to_codespeed(bench_name, memusage, executable=executable)
-
-
-def _try_execute_and_report_time(
-        bench_name, cmd, num_tries=1, check_returncode=True,
-        executable='bitcoind'):
-    """
-    Attempt to execute some command a number of times and then report
-    its execution duration to codespeed over HTTP.
-    """
-    for i in range(num_tries):
-        start = time.time()
-        ps = _popen(cmd)
-
-        logger.info("[%s] command '%s' starting", bench_name, cmd)
-
-        (stdout, stderr) = ps.communicate()
-        total_time = time.time() - start
-        stdout = stdout.decode()[:100000]
-        stderr = stderr.decode()[:100000]
-
-        if (check_returncode and ps.returncode != 0) \
-                or check_for_failure(bench_name, stdout, stderr, total_time):
-            logger.error(
-                "[%s] command '%s' failed\nstdout:\n%s\nstderr:\n%s",
-                bench_name, cmd, stdout, stderr)
-
-            if i == (num_tries - 1):
-                return False
-            continue
-        else:
-            # Command succeeded
-            break
+    NAME_TO_TIME[bench_name+'.mem-usage'].append(memusage)
+    if report_memory:
+        send_to_codespeed(bench_name+'.mem-usage', memusage, executable=executable)
 
     logger.info(
         "[%s] command '%s' finished successfully in %.3f seconds (%s)",
         bench_name, cmd, total_time, datetime.timedelta(seconds=total_time))
 
     NAME_TO_TIME[bench_name].append(total_time)
-    send_to_codespeed(bench_name, total_time, executable=executable)
+    if report_time:
+        send_to_codespeed(bench_name, total_time, executable=executable)
 
 
 def check_for_failure(bench_name, stdout, stderr, total_time_secs):
