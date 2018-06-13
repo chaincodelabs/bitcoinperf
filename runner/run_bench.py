@@ -175,10 +175,11 @@ def run_benches():
             # "Benchmark, evals, iterations, total, min, max, median"
             assert(len(line) == 7)
             (bench, median, max_, min_) = (
-                line[0], line[-1], line[-2], line[-3])
+                line[0], float(line[-1]), float(line[-2]), float(line[-3]))
             if not (max_ >= median >= min_):
                 logger.warning(
                     f"{bench} has weird results: {max_}, {median}, {min_}")
+                assert False
             send_to_codespeed(
                 f"micro.{bench}",
                 median, max_, min_, executable='bench-bitcoin')
