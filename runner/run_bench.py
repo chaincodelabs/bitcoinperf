@@ -136,10 +136,7 @@ def run_benches():
 
     if _shouldrun('makecheck'):
         _try_execute_and_report(
-            f'makecheck.{NPROC - 1}', f"make -j {NPROC - 1} check", num_tries=3,
-            # make check seems to return non-zero exit codes even when it has
-            # succeeded.
-            check_returncode=False,
+            f'makecheck.{NPROC - 1}', f"make -j {NPROC - 1} check",
             executable='make')
 
     if _shouldrun('functionaltests'):
