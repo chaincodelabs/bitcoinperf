@@ -5,6 +5,7 @@ Run a series of benchmarks against a particular Bitcoin Core revision.
 See bin/run_bench for a sample invocation.
 """
 
+import atexit
 import os
 import subprocess
 import json
@@ -15,6 +16,7 @@ import requests
 import logging
 import shlex
 import sys
+import getpass
 import typing as t
 from collections import defaultdict
 from pathlib import Path
@@ -87,8 +89,18 @@ def timer(name: str):
 class RunData:
     current_commit: str = None
 
+    # The working directory for this benchmark. Contains a `bitcoin/` subdir.
+    workdir: Path = None
+
+    # Did we acquire the benchmarking lockfile?
+    lockfile_acquired: bool = False
+
 
 RUN_DATA = RunData()
+
+# Maintain a lockfile that is global across the host to ensure that we're not
+# running more than one instance on a given system.
+LOCKFILE_PATH = Path("/tmp/bitcoin_bench.lock")
 
 
 def run_benches():
@@ -96,7 +108,12 @@ def run_benches():
     Create a tmp directory in which we will clone bitcoin, build it, and run
     various benchmarks.
     """
+    if not _try_acquire_lockfile():
+        logger.error(f"Couldn't acquire lockfile {LOCKFILE_PATH}; exiting")
+        sys.exit(1)
+
     workdir: Path = _create_working_dir()
+    RUN_DATA.workdir = workdir
 
     os.chdir(workdir)
 
@@ -198,9 +215,31 @@ def run_benches():
         send_slack_msg(
             f"Finished reindex ({RUN_DATA.current_commit})")
 
-    os.chdir(workdir / "..")
+
+def _try_acquire_lockfile():
+    if LOCKFILE_PATH.exists():
+        return False
+
+    with LOCKFILE_PATH.open('w') as f:
+        f.write(f"{datetime.datetime.utcnow()},{getpass.getuser()}")
+    RUN_DATA.lockfile_acquired = True
+    return True
+
+
+def _clean_shutdown():
+    # Release lockfile if we've got it
+    if RUN_DATA.lockfile_acquired:
+        LOCKFILE_PATH.unlink()
+        logger.debug("shutdown: removed lockfile at %s", LOCKFILE_PATH)
+
     # Clean up to avoid filling disk
-    _run(f"rm -rf {workdir}")
+    if RUN_DATA.workdir:
+        os.chdir(RUN_DATA.workdir / "..")
+        _run(f"rm -rf {RUN_DATA.workdir}")
+        logger.debug("shutdown: removed workdir at %s", RUN_DATA.workdir)
+
+
+atexit.register(_clean_shutdown)
 
 
 def _create_working_dir():
