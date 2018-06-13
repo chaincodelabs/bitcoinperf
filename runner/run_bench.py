@@ -24,7 +24,7 @@ from pathlib import Path
 
 class SlackLogHandler(logging.Handler):
     def emit(self, record):
-        return send_slack_msg(self.format(record))
+        return send_to_slack(self.format(record))
 
 
 def _get_logger():
@@ -36,7 +36,7 @@ def _get_logger():
 
     slack = SlackLogHandler()
     slack.setLevel('WARNING')
-    slack.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+    slack.setFormatter(logging.Formatter('%(message)s'))
 
     logger.addHandler(sh)
     logger.addHandler(slack)
@@ -129,7 +129,7 @@ def run_benches():
 
     RUN_DATA.current_commit = subprocess.check_output(
         shlex.split('git rev-parse HEAD')).strip()
-    send_slack_msg(
+    send_to_slack(
         f"Starting benchmark for {REPO_BRANCH} "
         f"({str(RUN_DATA.current_commit)})")
 
@@ -194,25 +194,25 @@ def run_benches():
         f'-port={BITCOIND_PORT} -rpcport={BITCOIND_RPCPORT}')
 
     if _shouldrun('ibd'):
-        send_slack_msg(
+        send_to_slack(
             f"Starting IBD for {REPO_BRANCH} ({RUN_DATA.current_commit})")
 
         _try_execute_and_report(
             f'ibd.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
             f'{run_bitcoind_cmd} -addnode={IBD_PEER_ADDRESS}')
 
-        send_slack_msg(
+        send_to_slack(
             f"Finished IBD ({RUN_DATA.current_commit})")
 
     if _shouldrun('reindex'):
-        send_slack_msg(
+        send_to_slack(
             f"Starting reindex for {REPO_BRANCH} ({RUN_DATA.current_commit})")
 
         _try_execute_and_report(
             f'reindex.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
             f'{run_bitcoind_cmd} -reindex')
 
-        send_slack_msg(
+        send_to_slack(
             f"Finished reindex ({RUN_DATA.current_commit})")
 
 
@@ -396,7 +396,7 @@ def send_to_codespeed(bench_name, result,
         )
 
 
-def send_slack_msg(txt):
+def send_to_slack(txt):
     if not SLACK_WEBHOOK_URL:
         return
 
@@ -414,12 +414,15 @@ def send_slack_msg(txt):
 
 
 def print_times_table():
-    print()
+    times = "\n"
     for name, times in NAME_TO_TIME.items():
         for i, time_ in enumerate(times):
-            print(
+            times += (
                 f"{name:40} "
-                f"{str(datetime.timedelta(seconds=time_)):<20}")
+                f"{str(datetime.timedelta(seconds=time_)):<20}\n")
+
+    print(times)
+    send_to_slack(times)
 
 
 if __name__ == '__main__':
