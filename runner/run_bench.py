@@ -33,9 +33,8 @@ def _get_logger():
         '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
 
     slack = SlackLogHandler()
-    slack.setLevel('INFO')
-    slack.setFormatter(logging.Formatter(
-        '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
+    slack.setLevel('WARNING')
+    slack.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
 
     logger.addHandler(sh)
     logger.addHandler(slack)
@@ -65,8 +64,8 @@ BITCOIND_PORT = os.environ.get('BITCOIND_PORT', '9003')
 BITCOIND_RPCPORT = os.environ.get('BITCOIND_RPCPORT', '9004')
 
 WORKING_DIR_NAME = (
-        f"/tmp/bench-{REPO_BRANCH}-"
-        f"{datetime.datetime.utcnow().strftime('%Y-%m-%d')}")
+    f"/tmp/bench-{REPO_BRANCH}-"
+    f"{datetime.datetime.utcnow().strftime('%Y-%m-%d')}")
 
 # FIXME reenable this at some point
 # NPROC = int(multiprocessing.cpu_count())
@@ -114,7 +113,8 @@ def run_benches():
     RUN_DATA.current_commit = subprocess.check_output(
         shlex.split('git rev-parse HEAD')).strip()
     send_slack_msg(
-        f"Starting benchmark for {REPO_BRANCH} ({RUN_DATA.current_commit})")
+        f"Starting benchmark for {REPO_BRANCH} "
+        f"({str(RUN_DATA.current_commit)})")
 
     if _shouldrun('build'):
         _run(f"./contrib/install_db4.sh .")
@@ -136,16 +136,13 @@ def run_benches():
 
     if _shouldrun('makecheck'):
         _try_execute_and_report(
-            f'makecheck.{NPROC - 1}', f"make -j {NPROC - 1} check", num_tries=3,
-            # make check seems to return non-zero exit codes even when it has
-            # succeeded.
-            check_returncode=False,
-            executable='make')
+            f'makecheck.{NPROC - 1}', f"make -j {NPROC - 1} check",
+            num_tries=3, executable='make')
 
     if _shouldrun('functionaltests'):
         _try_execute_and_report(
-            'functionaltests', f"./test/functional/test_runner.py", num_tries=3,
-            executable='functional-test-runner')
+            'functionaltests', f"./test/functional/test_runner.py",
+            num_tries=3, executable='functional-test-runner')
 
     if _shouldrun('microbench'):
         with timer("microbench"):
@@ -242,8 +239,8 @@ def _shouldrun(bench_name):
 
 
 def _try_execute_and_report(
-        bench_name, cmd, *, report_memory=True, report_time=True, num_tries=1, check_returncode=True,
-        executable='bitcoind'):
+        bench_name, cmd, *, report_memory=True, report_time=True, num_tries=1,
+        check_returncode=True, executable='bitcoind'):
     """
     Attempt to execute some command a number of times and then report
     its execution memory usage or execution time to codespeed over HTTP.
@@ -280,9 +277,10 @@ def _try_execute_and_report(
         "with maximum resident set size %.3f MiB",
         bench_name, cmd, memusage / 1024)
 
-    NAME_TO_TIME[bench_name+'.mem-usage'].append(memusage)
+    mem_name = bench_name + '.mem-usage'
+    NAME_TO_TIME[mem_name].append(memusage)
     if report_memory:
-        send_to_codespeed(bench_name+'.mem-usage', memusage, executable=executable)
+        send_to_codespeed(mem_name, memusage, executable=executable)
 
     logger.info(
         "[%s] command '%s' finished successfully in %.3f seconds (%s)",
