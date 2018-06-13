@@ -12,7 +12,7 @@ TOPDIR = os.path.split(BASEDIR)[1]
 
 # Codespeed config ------------------------------------------------------------
 
-WEBSITE_NAME = "Bitcoin bench" # This name will be used in the reports RSS feed
+WEBSITE_NAME = "Bitcoin Core bench" # This name will be used in the reports RSS feed
 
 DEF_ENVIRONMENT = None # Name of the environment which should be selected as default
 
