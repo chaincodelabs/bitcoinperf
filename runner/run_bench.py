@@ -53,9 +53,6 @@ REPO_BRANCH = os.environ.get('REPO_BRANCH', 'master')
 CODESPEED_URL = os.environ.get('CODESPEED_URL', 'http://localhost:8000')
 IBD_PEER_ADDRESS = os.environ.get('IBD_PEER_ADDRESS', '')
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
-CODESPEED_USER = os.environ['CODESPEED_USER']
-CODESPEED_PASSWORD = os.environ['CODESPEED_PASSWORD']
-CODESPEED_ENV_NAME = os.environ['CODESPEED_ENV_NAME']
 SKIP_BUILD = bool(os.environ.get('SKIP_BUILD', ''))
 BENCHES_TO_RUN = [
     i for i in os.environ.get('BENCHES_TO_RUN', '').split(',') if i]
@@ -70,7 +67,16 @@ BITCOIND_RPCPORT = os.environ.get('BITCOIND_RPCPORT', '9004')
 # NPROC = int(multiprocessing.cpu_count())
 NPROC = 4
 NPROC = int(os.environ.get('NPROC', str(NPROC)))
+
 CODESPEED_NO_SEND = bool(os.environ.get('CODESPEED_NO_SEND', ''))
+CODESPEED_USER = os.environ.get('CODESPEED_USER')
+CODESPEED_PASSWORD = os.environ.get('CODESPEED_PASSWORD')
+CODESPEED_ENV_NAME = os.environ.get('CODESPEED_ENV_NAME')
+
+if not CODESPEED_NO_SEND:
+    assert(CODESPEED_USER)
+    assert(CODESPEED_PASSWORD)
+    assert(CODESPEED_ENV_NAME)
 
 
 NAME_TO_TIME: t.Dict[str, int] = defaultdict(list)
