@@ -22,7 +22,7 @@ The benchmarks which are monitored are
 0. Obtain all the dependencies necessary to build Bitcoin Core. Obtain an up-to-date
    copy of the chain at some `$datadir` location.
 0. Install the additional requirements through your package manager: `time wget git python3-pip` (must be python3.6).
-0. Then, install `requests` through the pip package manager.
+0. Then, run `pip3 install -r runner/requirements.txt`.
 
 #### Starting codespeed
 
