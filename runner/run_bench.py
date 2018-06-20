@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.6
+#!/usr/bin/env python3
 """
 Run a series of benchmarks against a particular Bitcoin Core revision.
 
@@ -18,42 +18,29 @@ import logging
 import shlex
 import sys
 import getpass
-import typing as t
+import multiprocessing
 from collections import defaultdict
 from pathlib import Path
 
 
-class SlackLogHandler(logging.Handler):
-    def emit(self, record):
-        return send_to_slack(self.format(record))
-
-
-def _get_logger():
-    logger = logging.getLogger(__name__)
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(os.environ.get('LOG_LEVEL', 'DEBUG'))
-    sh.setFormatter(logging.Formatter(
-        '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
-
-    slack = SlackLogHandler()
-    slack.setLevel('WARNING')
-    slack.setFormatter(logging.Formatter('%(message)s'))
-
-    logger.addHandler(sh)
-    logger.addHandler(slack)
-    logger.setLevel('DEBUG')
-    return logger
-
-
-logger = _get_logger()
-
 REPO_LOCATION = os.environ.get(
     'REPO_LOCATION', 'https://github.com/bitcoin/bitcoin.git')
 REPO_BRANCH = os.environ.get('REPO_BRANCH', 'master')
-CODESPEED_URL = os.environ.get('CODESPEED_URL', 'http://localhost:8000')
+
+# Optional specification for where the temporary bitcoin clone will live.
+WORKDIR = os.environ.get('WORKDIR', '')
 IBD_PEER_ADDRESS = os.environ.get('IBD_PEER_ADDRESS', '')
+
+# When using a local IBD peer, specify a datadir which contains a chain high
+# enough to do the requested IBD.
+SYNCED_DATA_DIR = os.environ.get('SYNCED_DATA_DIR', '')
+
+if not IBD_PEER_ADDRESS and not SYNCED_DATA_DIR:
+    raise RuntimeError(
+        "must specify SYNCED_DATA_DIR when using a local peer for ibd")
+
+CODESPEED_URL = os.environ.get('CODESPEED_URL', 'http://localhost:8000')
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
-SKIP_BUILD = bool(os.environ.get('SKIP_BUILD', ''))
 BENCHES_TO_RUN = [
     i for i in os.environ.get('BENCHES_TO_RUN', '').split(',') if i]
 CHECKOUT_COMMIT = os.environ.get('CHECKOUT_COMMIT')
@@ -63,10 +50,17 @@ BITCOIND_STOPATHEIGHT = os.environ.get('BITCOIND_STOPATHEIGHT', '522000')
 BITCOIND_PORT = os.environ.get('BITCOIND_PORT', '9003')
 BITCOIND_RPCPORT = os.environ.get('BITCOIND_RPCPORT', '9004')
 
-# FIXME reenable this at some point
-# NPROC = int(multiprocessing.cpu_count())
-NPROC = 4
+# Where the bitcoind binary which will serve blocks for IBD lives.
+SYNCED_BITCOIN_REPO_DIR = os.environ.get(
+    'SYNCED_BITCOIN_REPO_DIR', os.environ['HOME'] + '/bitcoin')
+
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
+
+NPROC = min(4, int(multiprocessing.cpu_count()))
 NPROC = int(os.environ.get('NPROC', str(NPROC)))
+
+# If true, leave the Bitcoin checkout intact after finishing
+NO_TEARDOWN = bool(os.environ.get('NO_TEARDOWN', ''))
 
 CODESPEED_NO_SEND = bool(os.environ.get('CODESPEED_NO_SEND', ''))
 CODESPEED_USER = os.environ.get('CODESPEED_USER')
@@ -79,7 +73,52 @@ if not CODESPEED_NO_SEND:
     assert(CODESPEED_ENV_NAME)
 
 
-NAME_TO_TIME: t.Dict[str, int] = defaultdict(list)
+class SlackLogHandler(logging.Handler):
+    def emit(self, record):
+        return send_to_slack(self.format(record))
+
+
+def _get_logger():
+    logger = logging.getLogger(__name__)
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setLevel(LOG_LEVEL)
+    sh.setFormatter(logging.Formatter(
+        '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
+
+    slack = SlackLogHandler()
+    slack.setLevel('WARNING')
+    slack.setFormatter(logging.Formatter('%(message)s'))
+
+    logger.addHandler(sh)
+    logger.addHandler(slack)
+    logger.setLevel(LOG_LEVEL)
+    return logger
+
+
+logger = _get_logger()
+
+RUNNING_SYNCED_BITCOIND_LOCALLY = False
+
+if not IBD_PEER_ADDRESS:
+    RUNNING_SYNCED_BITCOIND_LOCALLY = True
+    IBD_PEER_ADDRESS = '127.0.0.1'
+    logger.info(
+        "Running synced chain node on localhost (no remote addr specified)")
+
+
+class RunData:
+    current_commit = None
+
+    # The working directory for this benchmark. Contains a `bitcoin/` subdir.
+    workdir = None
+
+    # Did we acquire the benchmarking lockfile?
+    lockfile_acquired = False
+
+
+RUN_DATA = RunData()
+
+NAME_TO_TIME = defaultdict(list)
 
 
 @contextlib.contextmanager
@@ -89,21 +128,107 @@ def timer(name: str):
     NAME_TO_TIME[name].append(time.time() - start)
 
 
-class RunData:
-    current_commit: str = None
-
-    # The working directory for this benchmark. Contains a `bitcoin/` subdir.
-    workdir: Path = None
-
-    # Did we acquire the benchmarking lockfile?
-    lockfile_acquired: bool = False
-
-
-RUN_DATA = RunData()
-
 # Maintain a lockfile that is global across the host to ensure that we're not
 # running more than one instance on a given system.
 LOCKFILE_PATH = Path("/tmp/bitcoin_bench.lock")
+
+
+@contextlib.contextmanager
+def run_synced_bitcoind():
+    """
+    Context manager which spawns (and cleans up) a bitcoind instance that has a
+    synced chain high enough to service an IBD up to BITCOIND_STOPATHEIGHT.
+    """
+    if not RUNNING_SYNCED_BITCOIND_LOCALLY:
+        # If we're not running a node locally, don't worry about setup and
+        # teardown.
+        yield
+        return
+
+    bitcoinps = _popen(
+        # Relies on bitcoind being precompiled and synced chain data existing
+        # in /bitcoin_data; see runner/Dockerfile.
+        "%s/src/bitcoind -datadir=%s "
+        "-rpcuser=foo -rpcpassword=bar -noconnect -listen=1 "
+        "-maxtipage=99999999999999" % (
+            SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR))
+
+    logger.info(
+        "started synced node with '%s' (pid %s)",
+        bitcoinps.args, bitcoinps.pid)
+
+    # Wait for bitcoind to come up.
+    num_tries = 100
+    sleep_time_secs = 2
+    bitcoind_up = False
+
+    while num_tries > 0 and bitcoinps.returncode is None and not bitcoind_up:
+        info = None
+        info_call = _run(
+            "%s/src/bitcoin-cli -rpcuser=foo -rpcpassword=bar "
+            "getblockchaininfo" % SYNCED_BITCOIN_REPO_DIR,
+            check_returncode=False)
+
+        if info_call[2] == 0:
+            info = json.loads(info_call[0].decode())
+        else:
+            logger.debug(
+                "non-zero returncode (%s) from synced bitcoind status check",
+                info_call[2])
+
+        if info and info["blocks"] < int(BITCOIND_STOPATHEIGHT):
+            raise RuntimeError(
+                "synced bitcoind node doesn't have enough blocks "
+                "(%s vs. %s)" % (info['blocks'], int(BITCOIND_STOPATHEIGHT)))
+        elif info:
+            bitcoind_up = True
+        else:
+            num_tries -= 1
+            time.sleep(sleep_time_secs)
+
+    if not bitcoind_up:
+        raise RuntimeError("Couldn't bring synced node up")
+
+    logger.info("synced node is active (pid %s)", bitcoinps.pid)
+
+    try:
+        yield
+    finally:
+        logger.info("shutting down synced node (pid %s)", bitcoinps.pid)
+        _run(
+            "%s/src/bitcoin-cli -rpcuser=foo -rpcpassword=bar stop" %
+            SYNCED_BITCOIN_REPO_DIR)
+        bitcoinps.wait(timeout=120)
+
+        if bitcoinps.returncode != 0:
+            logger.warning(
+                "synced bitcoind returned with nonzero return code "
+                "%s" % bitcoinps.returncode)
+
+
+def _drop_caches():
+    # N.B.: the host sudoer file needs to be configured to allow non-superusers
+    # to run this command. See: https://unix.stackexchange.com/a/168670
+    _run("sudo /sbin/sysctl vm.drop_caches=3")
+
+
+def _startup_assertions():
+    """
+    Ensure the benchmark environment is suitable in various ways.
+    """
+    if _run("pgrep bitcoin", check_returncode=False)[2] == 0:
+        raise RuntimeError(
+            "benchmarks shouldn't run concurrently with unrelated bitcoin "
+            "processes")
+
+    if _run('cat /proc/swaps | grep -v "^Filename"',
+            check_returncode=False)[2] != 1:
+        raise RuntimeError(
+            "swap must be disabled during benchmarking")
+
+    if not _try_acquire_lockfile():
+        raise RuntimeError(
+            "Couldn't acquire lockfile %s; exiting", LOCKFILE_PATH)
 
 
 def run_benches():
@@ -111,39 +236,41 @@ def run_benches():
     Create a tmp directory in which we will clone bitcoin, build it, and run
     various benchmarks.
     """
-    if not _try_acquire_lockfile():
-        logger.error(f"Couldn't acquire lockfile {LOCKFILE_PATH}; exiting")
-        sys.exit(1)
+    _startup_assertions()
 
-    workdir = Path(tempfile.mkdtemp(prefix=
-        f"bench-{REPO_BRANCH}-"
-        f"{datetime.datetime.utcnow().strftime('%Y-%m-%d')}-"))
+    if WORKDIR:
+        workdir = Path(WORKDIR)
+    else:
+        workdir = Path(tempfile.mkdtemp(prefix=(
+            "bench-%s-%s-" %
+            (REPO_BRANCH, datetime.datetime.utcnow().strftime('%Y-%m-%d')))))
     RUN_DATA.workdir = workdir
 
-    os.chdir(workdir)
+    os.chdir(str(workdir))
 
     if _shouldrun('gitclone'):
+        _drop_caches()
         with timer("gitclone"):
-            _run(f"git clone -b {REPO_BRANCH} {REPO_LOCATION}")
+            _run("git clone -b %s %s" % (REPO_BRANCH, REPO_LOCATION))
 
-    os.chdir(workdir / 'bitcoin')
+    os.chdir(str(workdir / 'bitcoin'))
 
     if CHECKOUT_COMMIT:
-        _run(f"git checkout {CHECKOUT_COMMIT}")
+        _run("git checkout %s" % CHECKOUT_COMMIT)
 
     RUN_DATA.current_commit = subprocess.check_output(
         shlex.split('git rev-parse HEAD')).strip()
     send_to_slack(
-        f"Starting benchmark for {REPO_BRANCH} "
-        f"({str(RUN_DATA.current_commit)})")
+        "Starting benchmark for %s (%s) " %
+        (REPO_BRANCH, str(RUN_DATA.current_commit)))
 
     if _shouldrun('build'):
-        _run(f"./contrib/install_db4.sh .")
+        _run("./contrib/install_db4.sh .")
 
         my_env = os.environ.copy()
-        my_env['BDB_PREFIX'] = f"{workdir}/bitcoin/db4"
+        my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % workdir
 
-        _run(f"./autogen.sh")
+        _run("./autogen.sh")
         _run(
             './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
             'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
@@ -151,22 +278,26 @@ def run_benches():
             # timed accurately.
             '--disable-ccache',
             env=my_env)
+        _drop_caches()
         _try_execute_and_report(
-            f'build.make.1', f"make -j 1",
+            'build.make.1', "make -j 1",
             executable='make')
 
     if _shouldrun('makecheck'):
+        _drop_caches()
         _try_execute_and_report(
-            f'makecheck.{NPROC - 1}', f"make -j {NPROC - 1} check",
+            'makecheck.%s' % (NPROC - 1), "make -j %s check" % (NPROC - 1),
             num_tries=3, executable='make')
 
     if _shouldrun('functionaltests'):
+        _drop_caches()
         _try_execute_and_report(
-            'functionaltests', f"./test/functional/test_runner.py",
+            'functionaltests', "./test/functional/test_runner.py",
             num_tries=3, executable='functional-test-runner')
 
     if _shouldrun('microbench'):
         with timer("microbench"):
+            _drop_caches()
             microbench_ps = _popen("./src/bench/bench_bitcoin")
             (microbench_output, _) = microbench_ps.communicate()
 
@@ -182,43 +313,57 @@ def run_benches():
                 line[0], float(line[-1]), float(line[-2]), float(line[-3]))
             if not (max_ >= median >= min_):
                 logger.warning(
-                    f"{bench} has weird results: {max_}, {median}, {min_}")
+                    "%s has weird results: %s, %s, %s" %
+                    (bench, max_, median, min_))
                 assert False
             send_to_codespeed(
-                f"micro.{bench}",
+                "micro.%s" % bench,
                 median, max_, min_, executable='bench-bitcoin')
 
     datadir = workdir / 'bitcoin' / 'data'
-    _run(f"rm -rf {datadir}", check_returncode=False)
-    os.mkdir(datadir)
+    _run("rm -rf %s" % datadir, check_returncode=False)
+    if not datadir.exists():
+        datadir.mkdir()
 
     run_bitcoind_cmd = (
-        f'./src/bitcoind -datadir={workdir}/bitcoin/data '
-        f'-dbcache={BITCOIND_DBCACHE} -txindex=1 '
-        f'-connect=0 -debug=all -stopatheight={BITCOIND_STOPATHEIGHT} '
-        f'-port={BITCOIND_PORT} -rpcport={BITCOIND_RPCPORT}')
+        './src/bitcoind -datadir=%s/bitcoin/data '
+        '-dbcache=%s -txindex=1 '
+        '-connect=0 -debug=all -stopatheight=%s '
+        '-port=%s -rpcport=%s' % (
+            workdir, BITCOIND_DBCACHE, BITCOIND_STOPATHEIGHT,
+            BITCOIND_PORT, BITCOIND_RPCPORT
+        ))
 
     if _shouldrun('ibd'):
         send_to_slack(
-            f"Starting IBD for {REPO_BRANCH} ({RUN_DATA.current_commit})")
+            "Starting IBD for %s (%s)" %
+            (REPO_BRANCH, RUN_DATA.current_commit))
 
-        _try_execute_and_report(
-            f'ibd.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
-            f'{run_bitcoind_cmd} -addnode={IBD_PEER_ADDRESS}')
+        with run_synced_bitcoind():
+            _drop_caches()
+            _try_execute_and_report(
+                'ibd.%s.dbcache=%s' % (
+                    BITCOIND_STOPATHEIGHT, BITCOIND_DBCACHE),
+                '%s -addnode=%s' % (
+                    run_bitcoind_cmd, IBD_PEER_ADDRESS),
+                )
 
         send_to_slack(
-            f"Finished IBD ({RUN_DATA.current_commit})")
+            "Finished IBD (%s)" % (RUN_DATA.current_commit))
 
     if _shouldrun('reindex'):
         send_to_slack(
-            f"Starting reindex for {REPO_BRANCH} ({RUN_DATA.current_commit})")
+            "Starting reindex for %s (%s)" %
+            (REPO_BRANCH, RUN_DATA.current_commit))
 
+        _drop_caches()
         _try_execute_and_report(
-            f'reindex.{BITCOIND_STOPATHEIGHT}.dbcache={BITCOIND_DBCACHE}',
-            f'{run_bitcoind_cmd} -reindex')
+            'reindex.%s.dbcache=%s' % (
+                BITCOIND_STOPATHEIGHT, BITCOIND_DBCACHE),
+            '%s -reindex' % run_bitcoind_cmd)
 
         send_to_slack(
-            f"Finished reindex ({RUN_DATA.current_commit})")
+            "Finished reindex %s" % (RUN_DATA.current_commit))
 
 
 def _try_acquire_lockfile():
@@ -226,7 +371,7 @@ def _try_acquire_lockfile():
         return False
 
     with LOCKFILE_PATH.open('w') as f:
-        f.write(f"{datetime.datetime.utcnow()},{getpass.getuser()}")
+        f.write("%s,%s" % (datetime.datetime.utcnow(), getpass.getuser()))
     RUN_DATA.lockfile_acquired = True
     return True
 
@@ -238,10 +383,12 @@ def _clean_shutdown():
         logger.debug("shutdown: removed lockfile at %s", LOCKFILE_PATH)
 
     # Clean up to avoid filling disk
-    if RUN_DATA.workdir:
-        os.chdir(RUN_DATA.workdir / "..")
-        _run(f"rm -rf {RUN_DATA.workdir}")
+    if RUN_DATA.workdir and not NO_TEARDOWN:
+        os.chdir(str(RUN_DATA.workdir / ".."))
+        _run("rm -rf %s" % RUN_DATA.workdir)
         logger.debug("shutdown: removed workdir at %s", RUN_DATA.workdir)
+    elif NO_TEARDOWN:
+        logger.debug("shutdown: leaving workdir at %s", RUN_DATA.workdir)
 
 
 atexit.register(_clean_shutdown)
@@ -256,8 +403,8 @@ def _run(*args, check_returncode=True, **kwargs) -> (bytes, bytes, int):
 
     if check_returncode and p.returncode != 0:
         raise RuntimeError(
-            f"Command '{args[0]}' failed with code {p.returncode}\n"
-            f"stderr:\n{stderr}\nstdout:\n{stdout}")
+            "Command '%s' failed with code %s\nstderr:\n%s\nstdout:\n%s" % (
+                args[0], p.returncode, stderr, stdout))
     return (stdout, stderr, p.returncode)
 
 
@@ -271,7 +418,7 @@ def _shouldrun(bench_name):
     should = (not BENCHES_TO_RUN) or bench_name in BENCHES_TO_RUN
 
     if should:
-        logger.info(f"Running benchmark '{bench_name}'")
+        logger.info("Running benchmark '%s'" % bench_name)
 
     return should
 
@@ -336,19 +483,20 @@ def check_for_failure(bench_name, stdout, stderr, total_time_secs):
     """
     if bench_name in ('ibd', 'reindex'):
         disk_warning_ps = subprocess.run(
-            f"tail -n 10000 {RUN_DATA.workdir}/bitcoin/data/debug.log | "
-            "grep 'Disk space is low!'")
+            "tail -n 10000 %s/bitcoin/data/debug.log | "
+            "grep 'Disk space is low!' " % RUN_DATA.workdir)
 
         if disk_warning_ps.returncode == 0:
             logger.warning(
-                f"Ran out of disk space while running benchmark {bench_name}")
+                "Ran out of disk space while running benchmark %s" %
+                bench_name)
             return True
 
     if bench_name == 'ibd':
         one_hour_secs = 60 * 60 * 2
 
         if total_time_secs < one_hour_secs:
-            logger.warning(f"IBD finished implausibly quickly")
+            logger.warning("IBD finished implausibly quickly")
             return True
 
     return False
@@ -413,15 +561,18 @@ def send_to_slack(txt):
 
 
 def print_times_table():
-    times = "\n"
+    timestr = "\n"
     for name, times in NAME_TO_TIME.items():
-        for i, time_ in enumerate(times):
-            times += (
-                f"{name:40} "
-                f"{str(datetime.timedelta(seconds=time_)):<20}\n")
+        for time_ in times:
+            val = str(datetime.timedelta(seconds=float(time_)))
 
-    print(times)
-    send_to_slack(times)
+            if 'mem-usage' in name:
+                val = "%sMiB" % (int(time_) / 1000).
+
+            timestr += "{0:40} {1:<20}\n".format(name, val)
+
+    print(timestr)
+    send_to_slack(timestr)
 
 
 if __name__ == '__main__':
