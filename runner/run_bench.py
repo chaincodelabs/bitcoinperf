@@ -264,61 +264,74 @@ def run_benches():
         "Starting benchmark for %s (%s) " %
         (REPO_BRANCH, str(RUN_DATA.current_commit)))
 
-    if _shouldrun('build'):
-        _run("./contrib/install_db4.sh .")
+    for compiler in ('clang', 'gcc'):
+        if _shouldrun('build'):
+            _run("./contrib/install_db4.sh .")
 
-        my_env = os.environ.copy()
-        my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % workdir
+            my_env = os.environ.copy()
+            my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % workdir
 
-        _run("./autogen.sh")
-        _run(
-            './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-            'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
-            # Ensure ccache is disabled so that subsequent make runs are
-            # timed accurately.
-            '--disable-ccache',
-            env=my_env)
-        _drop_caches()
-        _try_execute_and_report(
-            'build.make.1', "make -j 1",
-            executable='make')
+            _run("./autogen.sh")
 
-    if _shouldrun('makecheck'):
-        _drop_caches()
-        _try_execute_and_report(
-            'makecheck.%s' % (NPROC - 1), "make -j %s check" % (NPROC - 1),
-            num_tries=3, executable='make')
+            configure_prefix = ''
+            if compiler == 'clang':
+                configure_prefix = 'CC=clang CXX=clang++ '
+            else:
+                _run('make distclean')  # Clean after clang run
 
-    if _shouldrun('functionaltests'):
-        _drop_caches()
-        _try_execute_and_report(
-            'functionaltests', "./test/functional/test_runner.py",
-            num_tries=3, executable='functional-test-runner')
+            _run(
+                configure_prefix +
+                './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
+                'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
+                # Ensure ccache is disabled so that subsequent make runs are
+                # timed accurately.
+                '--disable-ccache',
+                env=my_env)
 
-    if _shouldrun('microbench'):
-        with timer("microbench"):
             _drop_caches()
-            microbench_ps = _popen("./src/bench/bench_bitcoin")
-            (microbench_output, _) = microbench_ps.communicate()
+            _try_execute_and_report(
+                'build.make.1.%s' % compiler, "make -j 1",
+                executable='make')
 
-        microbench_lines = [
-            # Skip the first line (header)
-            i.decode().split(', ') for i in microbench_output.splitlines()[1:]]
+        if _shouldrun('makecheck'):
+            _drop_caches()
+            _try_execute_and_report(
+                'makecheck.%s.%s' % (compiler, NPROC - 1),
+                "make -j %s check" % (NPROC - 1),
+                num_tries=3, executable='make')
 
-        for line in microbench_lines:
-            # Line strucure is
-            # "Benchmark, evals, iterations, total, min, max, median"
-            assert(len(line) == 7)
-            (bench, median, max_, min_) = (
-                line[0], float(line[-1]), float(line[-2]), float(line[-3]))
-            if not (max_ >= median >= min_):
-                logger.warning(
-                    "%s has weird results: %s, %s, %s" %
-                    (bench, max_, median, min_))
-                assert False
-            send_to_codespeed(
-                "micro.%s" % bench,
-                median, max_, min_, executable='bench-bitcoin')
+        if _shouldrun('functionaltests'):
+            _drop_caches()
+            _try_execute_and_report(
+                'functionaltests.%s' % compiler,
+                "./test/functional/test_runner.py",
+                num_tries=3, executable='functional-test-runner')
+
+        if _shouldrun('microbench'):
+            with timer("microbench.%s" % compiler):
+                _drop_caches()
+                microbench_ps = _popen("./src/bench/bench_bitcoin")
+                (microbench_output, _) = microbench_ps.communicate()
+
+            microbench_lines = [
+                # Skip the first line (header)
+                i.decode().split(', ')
+                for i in microbench_output.splitlines()[1:]]
+
+            for line in microbench_lines:
+                # Line strucure is
+                # "Benchmark, evals, iterations, total, min, max, median"
+                assert(len(line) == 7)
+                (bench, median, max_, min_) = (
+                    line[0], float(line[-1]), float(line[-2]), float(line[-3]))
+                if not (max_ >= median >= min_):
+                    logger.warning(
+                        "%s has weird results: %s, %s, %s" %
+                        (bench, max_, median, min_))
+                    assert False
+                send_to_codespeed(
+                    "micro.%s.%s" % (compiler, bench),
+                    median, max_, min_, executable='bench-bitcoin')
 
     datadir = workdir / 'bitcoin' / 'data'
     _run("rm -rf %s" % datadir, check_returncode=False)
@@ -567,7 +580,7 @@ def print_times_table():
             val = str(datetime.timedelta(seconds=float(time_)))
 
             if 'mem-usage' in name:
-                val = "%sMiB" % (int(time_) / 1000).
+                val = "%sMiB" % (int(time_) / 1000.)
 
             timestr += "{0:40} {1:<20}\n".format(name, val)
 
