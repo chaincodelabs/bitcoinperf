@@ -105,5 +105,6 @@ venv.bak/
 
 # Deploy-specific .env file, potentially containing Codespeed credentials.
 bin/.env
+runner/.env
 
 data.db
