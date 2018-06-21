@@ -478,7 +478,7 @@ def _try_execute_and_report(
     mem_name = bench_name + '.mem-usage'
     NAME_TO_TIME[mem_name].append(memusage)
     if report_memory:
-        send_to_codespeed(mem_name, memusage, executable=executable)
+        send_to_codespeed(mem_name, memusage, executable=executable, units_title='Size', units='KiB')
 
     logger.info(
         "[%s] command '%s' finished successfully in %.3f seconds (%s)",
@@ -515,8 +515,8 @@ def check_for_failure(bench_name, stdout, stderr, total_time_secs):
     return False
 
 
-def send_to_codespeed(bench_name, result,
-                      result_max=None, result_min=None, executable='bitcoind'):
+def send_to_codespeed(bench_name, result, *, executable, lessisbetter=True, units_title='Time', units='seconds', description='',
+                      result_max=None, result_min=None):
     """
     Send a benchmark result to codespeed over HTTP.
     """
@@ -536,6 +536,11 @@ def send_to_codespeed(bench_name, result,
         # 'std_dev': std_dev,  # Optional. Default is blank
         'max': result_max,  # Optional. Default is blank
         'min': result_min,  # Optional. Default is blank
+        # Ignored if bench_name already exists:
+        'lessisbetter': lessisbetter,
+        'units_title': units_title,
+        'units': units,
+        'description': description,
     }
 
     logger.debug(
