@@ -62,6 +62,9 @@ NPROC = int(os.environ.get('NPROC', str(NPROC)))
 # If true, leave the Bitcoin checkout intact after finishing
 NO_TEARDOWN = bool(os.environ.get('NO_TEARDOWN', ''))
 
+# If true, don't perform a variety of startup checks and cache drops
+NO_CAUTION = bool(os.environ.get('NO_CAUTION', ''))
+
 CODESPEED_NO_SEND = bool(os.environ.get('CODESPEED_NO_SEND', ''))
 CODESPEED_USER = os.environ.get('CODESPEED_USER')
 CODESPEED_PASSWORD = os.environ.get('CODESPEED_PASSWORD')
@@ -209,20 +212,22 @@ def run_synced_bitcoind():
 def _drop_caches():
     # N.B.: the host sudoer file needs to be configured to allow non-superusers
     # to run this command. See: https://unix.stackexchange.com/a/168670
-    _run("sudo /sbin/sysctl vm.drop_caches=3")
+    if not NO_CAUTION:
+        _run("sudo /sbin/sysctl vm.drop_caches=3")
 
 
 def _startup_assertions():
     """
     Ensure the benchmark environment is suitable in various ways.
     """
-    if _run("pgrep bitcoin", check_returncode=False)[2] == 0:
+    if _run("pgrep bitcoin", check_returncode=False)[2] == 0 and \
+            not NO_CAUTION:
         raise RuntimeError(
             "benchmarks shouldn't run concurrently with unrelated bitcoin "
             "processes")
 
     if _run('cat /proc/swaps | grep -v "^Filename"',
-            check_returncode=False)[2] != 1:
+            check_returncode=False)[2] != 1 and not NO_CAUTION:
         raise RuntimeError(
             "swap must be disabled during benchmarking")
 
@@ -331,7 +336,7 @@ def run_benches():
                     assert False
                 send_to_codespeed(
                     "micro.%s.%s" % (compiler, bench),
-                    median, max_, min_, executable='bench-bitcoin')
+                    median, 'bench-bitcoin', result_max=max_, result_min=min_)
 
     datadir = workdir / 'bitcoin' / 'data'
     _run("rm -rf %s" % datadir, check_returncode=False)
@@ -478,7 +483,8 @@ def _try_execute_and_report(
     mem_name = bench_name + '.mem-usage'
     NAME_TO_TIME[mem_name].append(memusage)
     if report_memory:
-        send_to_codespeed(mem_name, memusage, executable=executable, units_title='Size', units='KiB')
+        send_to_codespeed(
+            mem_name, memusage, executable, units_title='Size', units='KiB')
 
     logger.info(
         "[%s] command '%s' finished successfully in %.3f seconds (%s)",
@@ -486,7 +492,7 @@ def _try_execute_and_report(
 
     NAME_TO_TIME[bench_name].append(total_time)
     if report_time:
-        send_to_codespeed(bench_name, total_time, executable=executable)
+        send_to_codespeed(bench_name, total_time, executable)
 
 
 def check_for_failure(bench_name, stdout, stderr, total_time_secs):
@@ -515,8 +521,10 @@ def check_for_failure(bench_name, stdout, stderr, total_time_secs):
     return False
 
 
-def send_to_codespeed(bench_name, result, *, executable, lessisbetter=True, units_title='Time', units='seconds', description='',
-                      result_max=None, result_min=None):
+def send_to_codespeed(
+        bench_name, result, executable,
+        lessisbetter=True, units_title='Time', units='seconds', description='',
+        result_max=None, result_min=None):
     """
     Send a benchmark result to codespeed over HTTP.
     """
