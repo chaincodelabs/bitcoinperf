@@ -60,17 +60,17 @@ NPROC = min(4, int(multiprocessing.cpu_count()))
 NPROC = int(os.environ.get('NPROC', str(NPROC)))
 
 # If true, leave the Bitcoin checkout intact after finishing
-NO_TEARDOWN = bool(os.environ.get('NO_TEARDOWN', ''))
+TEARDOWN = bool(os.environ.get('TEARDOWN', '1'))
 
 # If true, don't perform a variety of startup checks and cache drops
-NO_CAUTION = bool(os.environ.get('NO_CAUTION', ''))
+CAUTION = bool(os.environ.get('CAUTION', '1'))
 
-CODESPEED_NO_SEND = bool(os.environ.get('CODESPEED_NO_SEND', ''))
+CODESPEED_SEND = bool(os.environ.get('CODESPEED_SEND', '1'))
 CODESPEED_USER = os.environ.get('CODESPEED_USER')
 CODESPEED_PASSWORD = os.environ.get('CODESPEED_PASSWORD')
 CODESPEED_ENV_NAME = os.environ.get('CODESPEED_ENV_NAME')
 
-if not CODESPEED_NO_SEND:
+if CODESPEED_SEND:
     assert(CODESPEED_USER)
     assert(CODESPEED_PASSWORD)
     assert(CODESPEED_ENV_NAME)
@@ -212,7 +212,7 @@ def run_synced_bitcoind():
 def _drop_caches():
     # N.B.: the host sudoer file needs to be configured to allow non-superusers
     # to run this command. See: https://unix.stackexchange.com/a/168670
-    if not NO_CAUTION:
+    if CAUTION:
         _run("sudo /sbin/sysctl vm.drop_caches=3")
 
 
@@ -221,13 +221,13 @@ def _startup_assertions():
     Ensure the benchmark environment is suitable in various ways.
     """
     if _run("pgrep bitcoin", check_returncode=False)[2] == 0 and \
-            not NO_CAUTION:
+            CAUTION:
         raise RuntimeError(
             "benchmarks shouldn't run concurrently with unrelated bitcoin "
             "processes")
 
     if _run('cat /proc/swaps | grep -v "^Filename"',
-            check_returncode=False)[2] != 1 and not NO_CAUTION:
+            check_returncode=False)[2] != 1 and CAUTION:
         raise RuntimeError(
             "swap must be disabled during benchmarking")
 
@@ -401,11 +401,11 @@ def _clean_shutdown():
         logger.debug("shutdown: removed lockfile at %s", LOCKFILE_PATH)
 
     # Clean up to avoid filling disk
-    if RUN_DATA.workdir and not NO_TEARDOWN:
+    if RUN_DATA.workdir and TEARDOWN:
         os.chdir(str(RUN_DATA.workdir / ".."))
         _run("rm -rf %s" % RUN_DATA.workdir)
         logger.debug("shutdown: removed workdir at %s", RUN_DATA.workdir)
-    elif NO_TEARDOWN:
+    elif not TEARDOWN:
         logger.debug("shutdown: leaving workdir at %s", RUN_DATA.workdir)
 
 
@@ -555,7 +555,7 @@ def send_to_codespeed(
         "Attempting to send benchmark (%s, %s) to codespeed",
         bench_name, result)
 
-    if CODESPEED_NO_SEND:
+    if not CODESPEED_SEND:
         return
 
     resp = requests.post(
