@@ -648,4 +648,4 @@ if __name__ == '__main__':
             send_to_slack_attachment("Benchmark complete", {}, text=timestr)
         except Exception:
             send_to_slack_attachment(
-                "Error", {}, text=traceback.format_exc(), color="danger")
+                "Error", {}, text=traceback.format_exc(), success=False)
