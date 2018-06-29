@@ -3,6 +3,11 @@
 Run a series of benchmarks against a particular Bitcoin Core revision.
 
 See bin/run_bench for a sample invocation.
+
+To run doctests:
+
+    ./runner/run_bench.py test
+
 """
 
 import atexit
@@ -16,9 +21,11 @@ import time
 import requests
 import logging
 import shlex
+import socket
 import sys
 import getpass
 import multiprocessing
+import traceback
 from collections import defaultdict
 from pathlib import Path
 
@@ -65,10 +72,19 @@ NO_TEARDOWN = bool(os.environ.get('NO_TEARDOWN', ''))
 # If true, don't perform a variety of startup checks and cache drops
 NO_CAUTION = bool(os.environ.get('NO_CAUTION', ''))
 
+HOSTNAME = socket.gethostname()
+
 CODESPEED_NO_SEND = bool(os.environ.get('CODESPEED_NO_SEND', ''))
 CODESPEED_USER = os.environ.get('CODESPEED_USER')
 CODESPEED_PASSWORD = os.environ.get('CODESPEED_PASSWORD')
-CODESPEED_ENV_NAME = os.environ.get('CODESPEED_ENV_NAME')
+# Prefill a sensisble default if we recognize the hostname
+CODESPEED_ENV_NAME = {
+    'bench-odroid-1': 'ccl-bench-odroid-1',
+    'bench-raspi-1': 'ccl-bench-raspi-1',
+    'bench-hdd-1': 'ccl-bench-hdd-1',
+    'bench-ssd-1': 'ccl-bench-ssd-1',
+}.get(HOSTNAME, os.environ.get('CODESPEED_ENV_NAME'))
+
 
 if not CODESPEED_NO_SEND:
     assert(CODESPEED_USER)
@@ -78,7 +94,7 @@ if not CODESPEED_NO_SEND:
 
 class SlackLogHandler(logging.Handler):
     def emit(self, record):
-        return send_to_slack(self.format(record))
+        return send_to_slack_txt(self.format(record))
 
 
 def _get_logger():
@@ -264,10 +280,8 @@ def run_benches():
         _run("git checkout %s" % CHECKOUT_COMMIT)
 
     RUN_DATA.current_commit = subprocess.check_output(
-        shlex.split('git rev-parse HEAD')).strip()
-    send_to_slack(
-        "Starting benchmark for %s (%s) " %
-        (REPO_BRANCH, str(RUN_DATA.current_commit)))
+        shlex.split('git rev-parse HEAD')).strip().decode()
+    send_to_slack_attachment("Starting benchmark", {})
 
     for compiler in ('clang', 'gcc'):
         if _shouldrun('build'):
@@ -353,10 +367,6 @@ def run_benches():
         ))
 
     if _shouldrun('ibd'):
-        send_to_slack(
-            "Starting IBD for %s (%s)" %
-            (REPO_BRANCH, RUN_DATA.current_commit))
-
         with run_synced_bitcoind():
             _drop_caches()
             _try_execute_and_report(
@@ -366,22 +376,12 @@ def run_benches():
                     run_bitcoind_cmd, IBD_PEER_ADDRESS),
                 )
 
-        send_to_slack(
-            "Finished IBD (%s)" % (RUN_DATA.current_commit))
-
     if _shouldrun('reindex'):
-        send_to_slack(
-            "Starting reindex for %s (%s)" %
-            (REPO_BRANCH, RUN_DATA.current_commit))
-
         _drop_caches()
         _try_execute_and_report(
             'reindex.%s.dbcache=%s' % (
                 BITCOIND_STOPATHEIGHT, BITCOIND_DBCACHE),
             '%s -reindex' % run_bitcoind_cmd)
-
-        send_to_slack(
-            "Finished reindex %s" % (RUN_DATA.current_commit))
 
 
 def _try_acquire_lockfile():
@@ -569,11 +569,35 @@ def send_to_codespeed(
         )
 
 
-def send_to_slack(txt):
+def send_to_slack_txt(txt):
+    _send_to_slack({'text': "[%s] %s" % (HOSTNAME, txt)})
+
+
+def send_to_slack_attachment(title, fields, text="", success=True):
+    fields['Host'] = HOSTNAME
+    fields['Commit'] = RUN_DATA.current_commit[:6]
+    fields['Branch'] = REPO_BRANCH
+
+    data = {
+        "attachments": [{
+            "title": title,
+            "fields": [
+                {"title": title, "value": val, "short": True} for (title, val)
+                in fields.items()
+            ],
+            "color": "good" if success else "danger",
+        }],
+    }
+
+    if text:
+        data['attachments'][0]['text'] = text
+
+    _send_to_slack(data)
+
+
+def _send_to_slack(slack_data):
     if not SLACK_WEBHOOK_URL:
         return
-
-    slack_data = {'text': txt}
 
     response = requests.post(
         SLACK_WEBHOOK_URL, data=json.dumps(slack_data),
@@ -586,21 +610,42 @@ def send_to_slack(txt):
         )
 
 
-def print_times_table():
+def get_times_table(name_to_times_map):
+    """
+    >>> print(get_times_table(
+    ...    {'a': [1, 2, 3], 'foo': [2.3], 'b.mem-usage': [3000]}))
+    <BLANKLINE>
+    a: 0:00:01
+    a: 0:00:02
+    a: 0:00:03
+    b.mem-usage: 3.0MiB
+    foo: 0:00:02.300000
+    <BLANKLINE>
+
+    """
     timestr = "\n"
-    for name, times in NAME_TO_TIME.items():
+    for name, times in sorted(name_to_times_map.items()):
         for time_ in times:
             val = str(datetime.timedelta(seconds=float(time_)))
 
             if 'mem-usage' in name:
                 val = "%sMiB" % (int(time_) / 1000.)
 
-            timestr += "{0:40} {1:<20}\n".format(name, val)
+            timestr += "{0}: {1}\n".format(name, val)
 
-    print(timestr)
-    send_to_slack(timestr)
+    return timestr
 
 
 if __name__ == '__main__':
-    run_benches()
-    print_times_table()
+    if len(sys.argv) > 1 and sys.argv[1] == 'test':
+        import doctest
+        doctest.testmod()
+    else:
+        try:
+            run_benches()
+            timestr = get_times_table(NAME_TO_TIME)
+            print(timestr)
+            send_to_slack_attachment("Benchmark complete", {}, text=timestr)
+        except Exception:
+            send_to_slack_attachment(
+                "Error", {}, text=traceback.format_exc(), color="danger")
