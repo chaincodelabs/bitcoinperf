@@ -332,6 +332,12 @@ def run_benches():
                 microbench_ps = _popen("./src/bench/bench_bitcoin")
                 (microbench_output, _) = microbench_ps.communicate()
 
+            if microbench_ps.returncode != 0:
+                send_to_slack_attachment(
+                    "Microbench exited with code %s" %
+                    microbench_ps.returncode,
+                    {}, text=microbench_output, success=False)
+
             microbench_lines = [
                 # Skip the first line (header)
                 i.decode().split(', ')
