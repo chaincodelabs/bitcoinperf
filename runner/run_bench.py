@@ -330,18 +330,21 @@ def run_benches():
             with timer("microbench.%s" % compiler):
                 _drop_caches()
                 microbench_ps = _popen("./src/bench/bench_bitcoin")
-                (microbench_output, _) = microbench_ps.communicate()
+                (microbench_stdout,
+                 microbench_stderr) = microbench_ps.communicate()
 
             if microbench_ps.returncode != 0:
+                text = "stdout:\n%s\nstderr:\n%s" % (
+                    microbench_stdout.decode(), microbench_stderr.decode())
+
                 send_to_slack_attachment(
                     "Microbench exited with code %s" %
-                    microbench_ps.returncode,
-                    {}, text=microbench_output.decode(), success=False)
+                    microbench_ps.returncode, {}, text=text, success=False)
 
             microbench_lines = [
                 # Skip the first line (header)
                 i.decode().split(', ')
-                for i in microbench_output.splitlines()[1:]]
+                for i in microbench_stdout.splitlines()[1:]]
 
             for line in microbench_lines:
                 # Line strucure is
