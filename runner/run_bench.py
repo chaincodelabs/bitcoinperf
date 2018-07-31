@@ -94,7 +94,13 @@ if not CODESPEED_NO_SEND:
 
 class SlackLogHandler(logging.Handler):
     def emit(self, record):
-        return send_to_slack_txt(self.format(record))
+        fmtd = self.format(record)
+
+        # If the log is multiple lines, treat the first line as the title and
+        # the remainder as text.
+        title, *rest = fmtd.split('\n', 1)
+        return send_to_slack_attachment(
+            title, {}, text=(rest[0] if rest else None), success=False)
 
 
 def _get_logger():
