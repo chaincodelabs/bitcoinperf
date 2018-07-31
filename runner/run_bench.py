@@ -336,7 +336,7 @@ def run_benches():
                 send_to_slack_attachment(
                     "Microbench exited with code %s" %
                     microbench_ps.returncode,
-                    {}, text=microbench_output, success=False)
+                    {}, text=microbench_output.decode(), success=False)
 
             microbench_lines = [
                 # Skip the first line (header)
