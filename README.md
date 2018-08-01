@@ -43,7 +43,7 @@ The benchmarks which are monitored are
 0. [assuming you have obtained a relatively up-to-date chain in `$datadir`]
 0. In a separate terminal window, run `./bin/start_synced $datadir`
 0. Ensure the peer is up by running
-   `/path/to/bitcoin-cli -rpcport=9001 -rpcuser=foo -rpcpassword=bar getblockchaininfo`.
+   `/path/to/bitcoin-cli -rpcport=9001 -datadir="${datadir}" getblockchaininfo`.
 
 
 #### Running the benchmarks

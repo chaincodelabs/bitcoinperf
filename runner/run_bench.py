@@ -176,10 +176,10 @@ def run_synced_bitcoind():
         # Relies on bitcoind being precompiled and synced chain data existing
         # in /bitcoin_data; see runner/Dockerfile.
         "%s/src/bitcoind -datadir=%s "
-        "-rpcuser=%s -rpcpassword=%s -noconnect -listen=1 "
+        "-noconnect -listen=1 "
         "-maxtipage=99999999999999" % (
             SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR,
-            BITCOIND_RPCUSER, BITCOIND_RPCPASSWORD))
+            ))
 
     logger.info(
         "started synced node with '%s' (pid %s)",
@@ -193,8 +193,8 @@ def run_synced_bitcoind():
     while num_tries > 0 and bitcoinps.returncode is None and not bitcoind_up:
         info = None
         info_call = _run(
-            "%s/src/bitcoin-cli -rpcuser=foo -rpcpassword=bar "
-            "getblockchaininfo" % SYNCED_BITCOIN_REPO_DIR,
+            "%s/src/bitcoin-cli -datadir=%s "
+            "getblockchaininfo" % SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR,
             check_returncode=False)
 
         if info_call[2] == 0:
@@ -224,8 +224,8 @@ def run_synced_bitcoind():
     finally:
         logger.info("shutting down synced node (pid %s)", bitcoinps.pid)
         _run(
-            "%s/src/bitcoin-cli -rpcuser=foo -rpcpassword=bar stop" %
-            SYNCED_BITCOIN_REPO_DIR)
+            "%s/src/bitcoin-cli -datadir=%s stop" %
+            SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR)
         bitcoinps.wait(timeout=120)
 
         if bitcoinps.returncode != 0:
@@ -378,10 +378,9 @@ def run_benches():
     run_bitcoind_cmd = (
         './src/bitcoind -datadir=%s/bitcoin/data '
         '-dbcache=%s -txindex=1 '
-        '-rpcusername=%s -rpcpassword=%s '
         '-connect=0 -debug=all -stopatheight=%s '
         '-port=%s -rpcport=%s' % (
-            workdir, BITCOIND_DBCACHE, BITCOIND_RPCUSER, BITCOIND_RPCPASSWORD,
+            workdir, BITCOIND_DBCACHE,
             BITCOIND_STOPATHEIGHT,
             BITCOIND_PORT, BITCOIND_RPCPORT
         ))
