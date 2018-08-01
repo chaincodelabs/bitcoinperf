@@ -56,8 +56,6 @@ BITCOIND_DBCACHE = os.environ.get('BITCOIND_DBCACHE', '2048')
 BITCOIND_STOPATHEIGHT = os.environ.get('BITCOIND_STOPATHEIGHT', '522000')
 BITCOIND_PORT = os.environ.get('BITCOIND_PORT', '9003')
 BITCOIND_RPCPORT = os.environ.get('BITCOIND_RPCPORT', '9004')
-BITCOIND_RPCUSER = os.environ.get('BITCOIND_RPCUSER', 'foo')
-BITCOIND_RPCPASSWORD = os.environ.get('BITCOIND_RPCPASSWORD', 'bar')
 
 # Where the bitcoind binary which will serve blocks for IBD lives.
 SYNCED_BITCOIN_REPO_DIR = os.environ.get(
