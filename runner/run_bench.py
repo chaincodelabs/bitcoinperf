@@ -56,6 +56,8 @@ BITCOIND_DBCACHE = os.environ.get('BITCOIND_DBCACHE', '2048')
 BITCOIND_STOPATHEIGHT = os.environ.get('BITCOIND_STOPATHEIGHT', '522000')
 BITCOIND_PORT = os.environ.get('BITCOIND_PORT', '9003')
 BITCOIND_RPCPORT = os.environ.get('BITCOIND_RPCPORT', '9004')
+BITCOIND_RPCUSER = os.environ.get('BITCOIND_RPCUSER', 'foo')
+BITCOIND_RPCPASSWORD = os.environ.get('BITCOIND_RPCPASSWORD', 'bar')
 
 # Where the bitcoind binary which will serve blocks for IBD lives.
 SYNCED_BITCOIN_REPO_DIR = os.environ.get(
@@ -174,9 +176,10 @@ def run_synced_bitcoind():
         # Relies on bitcoind being precompiled and synced chain data existing
         # in /bitcoin_data; see runner/Dockerfile.
         "%s/src/bitcoind -datadir=%s "
-        "-rpcuser=foo -rpcpassword=bar -noconnect -listen=1 "
+        "-rpcuser=%s -rpcpassword=%s -noconnect -listen=1 "
         "-maxtipage=99999999999999" % (
-            SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR))
+            SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR,
+            BITCOIND_RPCUSER, BITCOIND_RPCPASSWORD))
 
     logger.info(
         "started synced node with '%s' (pid %s)",
@@ -375,9 +378,11 @@ def run_benches():
     run_bitcoind_cmd = (
         './src/bitcoind -datadir=%s/bitcoin/data '
         '-dbcache=%s -txindex=1 '
+        '-rpcusername=%s -rpcpassword=%s '
         '-connect=0 -debug=all -stopatheight=%s '
         '-port=%s -rpcport=%s' % (
-            workdir, BITCOIND_DBCACHE, BITCOIND_STOPATHEIGHT,
+            workdir, BITCOIND_DBCACHE, BITCOIND_RPCUSER, BITCOIND_RPCPASSWORD,
+            BITCOIND_STOPATHEIGHT,
             BITCOIND_PORT, BITCOIND_RPCPORT
         ))
 
