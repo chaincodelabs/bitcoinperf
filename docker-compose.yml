@@ -6,7 +6,7 @@ services:
       context: ./runner
     command: |
       /bitcoin/src/bitcoind -datadir=/bitcoin_data -printtoconsole
-      -rpcuser=foo -rpcpassword=bar -noconnect -listen=1
+      -noconnect -listen=1
       -maxtipage=9999999999999 
     volumes:
       - "${SYNCED_DATADIR}:/bitcoin_data"
