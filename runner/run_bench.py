@@ -304,13 +304,21 @@ def run_benches():
             else:
                 _run('make distclean')  # Clean after clang run
 
+            boostflags = ''
+            armlib_path = '/usr/lib/arm-linux-gnueabihf/'
+
+            if Path(armlib_path).is_dir():
+                # On some architectures we need to manually specify this,
+                # otherwise configuring with clang can fail.
+                boostflags = '--with-boost-libdir=%s' % armlib_path
+
             _run(
                 configure_prefix +
                 './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
                 'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
                 # Ensure ccache is disabled so that subsequent make runs are
                 # timed accurately.
-                '--disable-ccache',
+                '--disable-ccache ' + boostflags,
                 env=my_env)
 
             _drop_caches()
