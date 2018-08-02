@@ -192,7 +192,7 @@ def run_synced_bitcoind():
         info = None
         info_call = _run(
             "%s/src/bitcoin-cli -datadir=%s "
-            "getblockchaininfo" % SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR,
+            "getblockchaininfo" % (SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR),
             check_returncode=False)
 
         if info_call[2] == 0:
@@ -221,9 +221,8 @@ def run_synced_bitcoind():
         yield
     finally:
         logger.info("shutting down synced node (pid %s)", bitcoinps.pid)
-        _run(
-            "%s/src/bitcoin-cli -datadir=%s stop" %
-            SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR)
+        _run("%s/src/bitcoin-cli -datadir=%s stop" % (SYNCED_BITCOIN_REPO_DIR,
+                                                      SYNCED_DATA_DIR))
         bitcoinps.wait(timeout=120)
 
         if bitcoinps.returncode != 0:
