@@ -5,7 +5,7 @@ import os
 # Codespeed settings that can be overwritten here.
 from codespeed.settings import *
 
-DEBUG = True
+DEBUG = False if 'DEBUG' not in os.environ else True
 
 BASEDIR = os.path.abspath(os.path.dirname(__file__))
 TOPDIR = os.path.split(BASEDIR)[1]
@@ -77,7 +77,7 @@ USE_MEDIAN_BANDS = True  # True to enable median bands on Timeline view
 
 
 ALLOW_ANONYMOUS_POST = False  # Whether anonymous users can post results
-REQUIRE_SECURE_AUTH = True  # Whether auth needs to be over a secure channel
+REQUIRE_SECURE_AUTH = DEBUG  # Whether auth needs to be over a secure channel
 # -----------------------------------------------------------------------------
 
 

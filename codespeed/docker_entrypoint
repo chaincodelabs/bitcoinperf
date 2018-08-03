@@ -1,0 +1,15 @@
+#!/bin/bash
+
+python manage.py migrate
+python manage.py shell < /code/initialize_data.py
+
+if [[ "$TESTING" != "" ]]; then
+  # Interactively, we'd just user `manage.py createsuperuser`.
+  echo "from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.filter(username='admin') or User.objects.create_superuser('admin', 'admin@test.bitcoinperf.com', 'password')" | python manage.py shell
+fi
+
+if [[ "$@" == "" ]]; then
+  python manage.py runserver 0.0.0.0:${HTTP_PORT:-8000}
+else
+  exec "$@"
+fi

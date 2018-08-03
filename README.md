@@ -17,6 +17,17 @@ The benchmarks which are monitored are
 - Reindex up to some height
 
 
+### Testing
+
+Install docker & docker-compose, then run
+
+```sh
+$ docker-compose build
+$ docker-compose up
+```
+
+and a benchmark up to height 10,000 will be run in test containers.
+
 ### Installation
 
 0. Obtain all the dependencies necessary to build Bitcoin Core. Obtain an up-to-date
@@ -29,12 +40,10 @@ The benchmarks which are monitored are
 0. `cd codespeed && pip install --user -r requirements.txt`
 0. Initialize the codespeed DB: `python manage.py migrate`
 0. Create an admin user (for posting results): `python manage.py createsuperuser`
-   - If you want `./bin/run_bench` to work unmodified, use credentials
-     `root/foobar00`.
 0. Load required initial data:
-   `python manage.py shell < ../bin/initialize_data.py`
+   `python manage.py shell < ./codespeed/initialize_data.py`
 0. In a separate terminal window, start the development server: `python
-   manage.py runserver 8000`
+   manage.py runserver 0.0.0.0:8000`
 0. Browse to http://localhost:8000 and ensure codespeed is up.
 
 
