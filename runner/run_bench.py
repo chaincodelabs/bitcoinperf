@@ -75,10 +75,10 @@ addarg('compilers', 'gcc,clang')
 
 addarg('checkout-commit', '', 'Test a particular branch, tag, or commit')
 
-addarg('bitcoind_dbcache', '2048' if MEM_GIB > 3 else '512')
-addarg('bitcoind_stopatheight', '522000')
-addarg('bitcoind_port', '9003')
-addarg('bitcoind_rpcport', '9004')
+addarg('bitcoind-dbcache', '2048' if MEM_GIB > 3 else '512')
+addarg('bitcoind-stopatheight', '522000')
+addarg('bitcoind-port', '9003')
+addarg('bitcoind-rpcport', '9004')
 addarg('log-level', 'DEBUG')
 addarg('nproc', min(4, int(multiprocessing.cpu_count())), type=int)
 addarg('no-teardown', False,
