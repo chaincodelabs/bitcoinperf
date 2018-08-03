@@ -5,7 +5,7 @@ import os
 # Codespeed settings that can be overwritten here.
 from codespeed.settings import *
 
-DEBUG = False if 'DEBUG' not in os.environ else True
+DEBUG = 'DEBUG' in os.environ
 
 BASEDIR = os.path.abspath(os.path.dirname(__file__))
 TOPDIR = os.path.split(BASEDIR)[1]
