@@ -13,7 +13,7 @@ The benchmarks which are monitored are
 - Unittest duration (make check)
 - Functional test framework duration (test/functional/test_runner.py)
 - Microbenchmarks (bench-bitcoin)
-- IBD up to some height from a local peer
+- IBD up to some height from a local peer or from the P2P network
 - Reindex up to some height
 
 
