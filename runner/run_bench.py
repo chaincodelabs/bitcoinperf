@@ -36,15 +36,13 @@ REPO_BRANCH = os.environ.get('REPO_BRANCH', 'master')
 
 # Optional specification for where the temporary bitcoin clone will live.
 WORKDIR = os.environ.get('WORKDIR', '')
+
+# If this is left blank, IBD will happen from the actual P2P network.
 IBD_PEER_ADDRESS = os.environ.get('IBD_PEER_ADDRESS', '')
 
 # When using a local IBD peer, specify a datadir which contains a chain high
 # enough to do the requested IBD.
 SYNCED_DATA_DIR = os.environ.get('SYNCED_DATA_DIR', '')
-
-if not IBD_PEER_ADDRESS and not SYNCED_DATA_DIR:
-    raise RuntimeError(
-        "must specify SYNCED_DATA_DIR when using a local peer for ibd")
 
 CODESPEED_URL = os.environ.get('CODESPEED_URL', 'http://localhost:8000')
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
@@ -124,11 +122,19 @@ logger = _get_logger()
 
 RUNNING_SYNCED_BITCOIND_LOCALLY = False
 
-if not IBD_PEER_ADDRESS:
+# True when running an IBD from random peers on the network, i.e. a "real" IBD.
+IBD_FROM_NETWORK = False
+
+if IBD_PEER_ADDRESS in ('localhost', '127.0.0.1', '0.0.0.0'):
     RUNNING_SYNCED_BITCOIND_LOCALLY = True
     IBD_PEER_ADDRESS = '127.0.0.1'
     logger.info(
         "Running synced chain node on localhost (no remote addr specified)")
+elif not IBD_PEER_ADDRESS:
+    IBD_FROM_NETWORK = True
+    logger.info(
+        "Running a REAL IBD from the P2P network. "
+        "This may result in inconsistent IBD times.")
 
 
 class RunData:
@@ -380,25 +386,33 @@ def run_benches():
     if not datadir.exists():
         datadir.mkdir()
 
+    connect_config = (
+        '-listen=0' if IBD_FROM_NETWORK else '-connect=0')
+    addnode_config = (
+        # If we aren't IBDing from random peers on the network, specify the
+        # peer.
+        ('-addnode=%s' % IBD_PEER_ADDRESS) if not IBD_FROM_NETWORK else '')
+
     run_bitcoind_cmd = (
         './src/bitcoind -datadir=%s/bitcoin/data '
         '-dbcache=%s -txindex=1 '
-        '-connect=0 -debug=all -stopatheight=%s '
+        '%s -debug=all -stopatheight=%s '
         '-port=%s -rpcport=%s' % (
-            workdir, BITCOIND_DBCACHE,
+            workdir, BITCOIND_DBCACHE, connect_config,
             BITCOIND_STOPATHEIGHT,
             BITCOIND_PORT, BITCOIND_RPCPORT
         ))
 
     if _shouldrun('ibd'):
+        ibd_bench_name = 'ibd.real' if IBD_FROM_NETWORK else 'ibd.local'
+
         with run_synced_bitcoind():
             _drop_caches()
             _try_execute_and_report(
-                'ibd.%s.dbcache=%s' % (
-                    BITCOIND_STOPATHEIGHT, BITCOIND_DBCACHE),
-                '%s -addnode=%s' % (
-                    run_bitcoind_cmd, IBD_PEER_ADDRESS),
-                )
+                '%s.%s.dbcache=%s' % (
+                    ibd_bench_name, BITCOIND_STOPATHEIGHT, BITCOIND_DBCACHE),
+                '%s %s' % (run_bitcoind_cmd, addnode_config),
+            )
 
     if _shouldrun('reindex'):
         _drop_caches()
