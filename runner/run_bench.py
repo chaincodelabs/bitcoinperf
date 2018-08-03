@@ -46,7 +46,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 def addarg(name, default, help=None, type=str):
     envvar_name = name.upper().replace('-', '_')
     parser.add_argument(
-        '--%s', default=os.environ.get(envvar_name, default),
+        '--%s' % name, default=os.environ.get(envvar_name, default),
         help=help, type=type)
 
 
@@ -66,12 +66,17 @@ addarg('synced-bitcoin-repo-dir', os.environ['HOME'] + '/bitcoin',
 addarg('codespeed-url', 'http://localhost:8000')
 addarg('slack-webhook-url', '')
 
+
+def csv_type(s):
+    return s.split(',')
+
+
 parser.add_argument(
-    '--benches-to-run', '',
+    '--benches-to-run', default='',
     help=('Only run a subset of benchmarks. Options: %s' %
-          ', '.join(BENCH_NAMES)),
-    type=lambda s: s.split(','))
-addarg('compilers', 'gcc,clang')
+          ', '.join(BENCH_NAMES)), type=csv_type)
+addarg('compilers', 'clang,gcc', type=csv_type)
+addarg('make-jobs', '1', type=int)
 
 addarg('checkout-commit', '', 'Test a particular branch, tag, or commit')
 
@@ -99,6 +104,8 @@ addarg('codespeed-envname', {
 
 
 args = parser.parse_args()
+args.benches_to_run = list(filter(None, args.benches_to_run))
+args.compilers = list(sorted(args.compilers))
 
 
 def check_args(args):
@@ -114,7 +121,7 @@ def check_args(args):
 
     for comp in args.compilers:
         if comp not in {'gcc', 'clang'}:
-            print("Unrecognized bench name %r" % comp)
+            print("Unrecognized compiler name %r" % comp)
             sys.exit(1)
 
 
@@ -363,7 +370,8 @@ def run_benches():
 
             _drop_caches()
             _try_execute_and_report(
-                'build.make.1.%s' % compiler, "make -j 1",
+                'build.make.%s.%s' % (args.make_jobs, compiler),
+                "make -j %s" % args.make_jobs,
                 executable='make')
 
         if _shouldrun('makecheck'):
@@ -649,7 +657,7 @@ def send_to_slack_txt(txt):
 
 def send_to_slack_attachment(title, fields, text="", success=True):
     fields['Host'] = HOSTNAME
-    fields['Commit'] = RUN_DATA.current_commit[:6]
+    fields['Commit'] = (RUN_DATA.current_commit or '')[:6]
     fields['Branch'] = args.repo_branch
 
     data = {
@@ -723,3 +731,4 @@ if __name__ == '__main__':
         except Exception:
             send_to_slack_attachment(
                 "Error", {}, text=traceback.format_exc(), success=False)
+            raise
