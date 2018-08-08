@@ -10,6 +10,7 @@ To run doctests:
 
 """
 
+import argparse
 import atexit
 import os
 import subprocess
@@ -30,64 +31,101 @@ from collections import defaultdict
 from pathlib import Path
 
 
-REPO_LOCATION = os.environ.get(
-    'REPO_LOCATION', 'https://github.com/bitcoin/bitcoin.git')
-REPO_BRANCH = os.environ.get('REPO_BRANCH', 'master')
-
-# Optional specification for where the temporary bitcoin clone will live.
-WORKDIR = os.environ.get('WORKDIR', '')
-
-# If this is left blank, IBD will happen from the actual P2P network.
-IBD_PEER_ADDRESS = os.environ.get('IBD_PEER_ADDRESS', '')
-
-# When using a local IBD peer, specify a datadir which contains a chain high
-# enough to do the requested IBD.
-SYNCED_DATA_DIR = os.environ.get('SYNCED_DATA_DIR', '')
-
-CODESPEED_URL = os.environ.get('CODESPEED_URL', 'http://localhost:8000')
-SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
-BENCHES_TO_RUN = [
-    i for i in os.environ.get('BENCHES_TO_RUN', '').split(',') if i]
-CHECKOUT_COMMIT = os.environ.get('CHECKOUT_COMMIT')
-
-BITCOIND_DBCACHE = os.environ.get('BITCOIND_DBCACHE', '2048')
-BITCOIND_STOPATHEIGHT = os.environ.get('BITCOIND_STOPATHEIGHT', '522000')
-BITCOIND_PORT = os.environ.get('BITCOIND_PORT', '9003')
-BITCOIND_RPCPORT = os.environ.get('BITCOIND_RPCPORT', '9004')
-
-# Where the bitcoind binary which will serve blocks for IBD lives.
-SYNCED_BITCOIN_REPO_DIR = os.environ.get(
-    'SYNCED_BITCOIN_REPO_DIR', os.environ['HOME'] + '/bitcoin')
-
-LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
-
-NPROC = min(4, int(multiprocessing.cpu_count()))
-NPROC = int(os.environ.get('NPROC', str(NPROC)))
-
-# If true, leave the Bitcoin checkout intact after finishing
-NO_TEARDOWN = bool(os.environ.get('NO_TEARDOWN', ''))
-
-# If true, don't perform a variety of startup checks and cache drops
-NO_CAUTION = bool(os.environ.get('NO_CAUTION', ''))
+# Get physical memory specs
+MEM_GIB = (
+    os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024. ** 3))
 
 HOSTNAME = socket.gethostname()
+BENCH_NAMES = {
+    'gitclone', 'build', 'makecheck', 'functionaltests',
+    'microbench', 'ibd', 'reindex'}
 
-CODESPEED_NO_SEND = bool(os.environ.get('CODESPEED_NO_SEND', ''))
-CODESPEED_USER = os.environ.get('CODESPEED_USER')
-CODESPEED_PASSWORD = os.environ.get('CODESPEED_PASSWORD')
-# Prefill a sensisble default if we recognize the hostname
-CODESPEED_ENV_NAME = {
+parser = argparse.ArgumentParser(description=__doc__)
+
+
+def addarg(name, default, help=None, type=str):
+    envvar_name = name.upper().replace('-', '_')
+    parser.add_argument(
+        '--%s' % name, default=os.environ.get(envvar_name, default),
+        help=help, type=type)
+
+
+addarg('repo-location', 'https://github.com/bitcoin/bitcoin.git')
+addarg('repo-branch', 'master', 'The branch to test')
+addarg('workdir', '',
+       'Path to where the temporary bitcoin clone will be checked out')
+addarg('ibd-peer-address', '',
+       'Network address to synced peer to IBD from. If left blank, '
+       'IBD will be done from the mainnet P2P network.')
+addarg('synced-data-dir', '',
+       'When using a local IBD peer, specify a path to a datadir synced to a '
+       'chain high enough to do the requested IBD '
+       '(see --bitcoind-stopatheight)')
+addarg('synced-bitcoin-repo-dir', os.environ['HOME'] + '/bitcoin',
+       'Where the bitcoind binary which will serve blocks for IBD lives')
+addarg('codespeed-url', 'http://localhost:8000')
+addarg('slack-webhook-url', '')
+
+
+def csv_type(s):
+    return s.split(',')
+
+
+parser.add_argument(
+    '--benches-to-run', default='',
+    help=('Only run a subset of benchmarks. Options: %s' %
+          ', '.join(BENCH_NAMES)), type=csv_type)
+addarg('compilers', 'clang,gcc', type=csv_type)
+addarg('make-jobs', '1', type=int)
+
+addarg('checkout-commit', '', 'Test a particular branch, tag, or commit')
+
+addarg('bitcoind-dbcache', '2048' if MEM_GIB > 3 else '512')
+addarg('bitcoind-stopatheight', '522000')
+addarg('bitcoind-port', '9003')
+addarg('bitcoind-rpcport', '9004')
+addarg('log-level', 'DEBUG')
+addarg('nproc', min(4, int(multiprocessing.cpu_count())), type=int)
+addarg('no-teardown', False,
+       'If true, leave the Bitcoin checkout intact after finishing', type=bool)
+addarg('no-caution', False,
+       "If true, don't perform a variety of startup checks and cache drops",
+       type=bool)
+addarg('codespeed-no-send', False,
+       "If true, don't send data to codespeed", type=bool)
+addarg('codespeed-user', '')
+addarg('codespeed-password', '')
+addarg('codespeed-envname', {
     'bench-odroid-1': 'ccl-bench-odroid-1',
     'bench-raspi-1': 'ccl-bench-raspi-1',
     'bench-hdd-1': 'ccl-bench-hdd-1',
     'bench-ssd-1': 'ccl-bench-ssd-1',
-}.get(HOSTNAME, os.environ.get('CODESPEED_ENV_NAME'))
+}.get(HOSTNAME))
 
 
-if not CODESPEED_NO_SEND:
-    assert(CODESPEED_USER)
-    assert(CODESPEED_PASSWORD)
-    assert(CODESPEED_ENV_NAME)
+args = parser.parse_args()
+args.benches_to_run = list(filter(None, args.benches_to_run))
+args.compilers = list(sorted(args.compilers))
+
+
+def check_args(args):
+    if not args.codespeed_no_send:
+        assert(args.codespeed_user)
+        assert(args.codespeed_password)
+        assert(args.codespeed_envname)
+
+    for name in args.benches_to_run:
+        if name not in BENCH_NAMES:
+            print("Unrecognized bench name %r" % name)
+            sys.exit(1)
+
+    for comp in args.compilers:
+        if comp not in {'gcc', 'clang'}:
+            print("Unrecognized compiler name %r" % comp)
+            sys.exit(1)
+
+
+check_args(args)
 
 
 class SlackLogHandler(logging.Handler):
@@ -104,7 +142,7 @@ class SlackLogHandler(logging.Handler):
 def _get_logger():
     logger = logging.getLogger(__name__)
     sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(LOG_LEVEL)
+    sh.setLevel(args.log_level)
     sh.setFormatter(logging.Formatter(
         '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
 
@@ -114,7 +152,7 @@ def _get_logger():
 
     logger.addHandler(sh)
     logger.addHandler(slack)
-    logger.setLevel(LOG_LEVEL)
+    logger.setLevel(args.log_level)
     return logger
 
 
@@ -125,12 +163,12 @@ RUNNING_SYNCED_BITCOIND_LOCALLY = False
 # True when running an IBD from random peers on the network, i.e. a "real" IBD.
 IBD_FROM_NETWORK = False
 
-if IBD_PEER_ADDRESS in ('localhost', '127.0.0.1', '0.0.0.0'):
+if args.ibd_peer_address in ('localhost', '127.0.0.1', '0.0.0.0'):
     RUNNING_SYNCED_BITCOIND_LOCALLY = True
-    IBD_PEER_ADDRESS = '127.0.0.1'
+    args.ibd_peer_address = '127.0.0.1'
     logger.info(
         "Running synced chain node on localhost (no remote addr specified)")
-elif not IBD_PEER_ADDRESS:
+elif not args.ibd_peer_address:
     IBD_FROM_NETWORK = True
     logger.info(
         "Running a REAL IBD from the P2P network. "
@@ -182,7 +220,7 @@ def run_synced_bitcoind():
         "%s/src/bitcoind -datadir=%s "
         "-noconnect -listen=1 "
         "-maxtipage=99999999999999" % (
-            SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR,
+            args.synced_bitcoin_repo_dir, args.synced_data_dir,
             ))
 
     logger.info(
@@ -198,7 +236,8 @@ def run_synced_bitcoind():
         info = None
         info_call = _run(
             "%s/src/bitcoin-cli -datadir=%s "
-            "getblockchaininfo" % (SYNCED_BITCOIN_REPO_DIR, SYNCED_DATA_DIR),
+            "getblockchaininfo" %
+            (args.synced_bitcoin_repo_dir, args.synced_data_dir),
             check_returncode=False)
 
         if info_call[2] == 0:
@@ -208,10 +247,11 @@ def run_synced_bitcoind():
                 "non-zero returncode (%s) from synced bitcoind status check",
                 info_call[2])
 
-        if info and info["blocks"] < int(BITCOIND_STOPATHEIGHT):
+        if info and info["blocks"] < int(args.bitcoind_stopatheight):
             raise RuntimeError(
                 "synced bitcoind node doesn't have enough blocks "
-                "(%s vs. %s)" % (info['blocks'], int(BITCOIND_STOPATHEIGHT)))
+                "(%s vs. %s)" %
+                (info['blocks'], int(args.bitcoind_stopatheight)))
         elif info:
             bitcoind_up = True
         else:
@@ -227,8 +267,8 @@ def run_synced_bitcoind():
         yield
     finally:
         logger.info("shutting down synced node (pid %s)", bitcoinps.pid)
-        _run("%s/src/bitcoin-cli -datadir=%s stop" % (SYNCED_BITCOIN_REPO_DIR,
-                                                      SYNCED_DATA_DIR))
+        _run("%s/src/bitcoin-cli -datadir=%s stop" %
+             (args.synced_bitcoin_repo_dir, args.synced_data_dir))
         bitcoinps.wait(timeout=120)
 
         if bitcoinps.returncode != 0:
@@ -240,7 +280,7 @@ def run_synced_bitcoind():
 def _drop_caches():
     # N.B.: the host sudoer file needs to be configured to allow non-superusers
     # to run this command. See: https://unix.stackexchange.com/a/168670
-    if not NO_CAUTION:
+    if not args.no_caution:
         _run("sudo /sbin/sysctl vm.drop_caches=3")
 
 
@@ -249,13 +289,13 @@ def _startup_assertions():
     Ensure the benchmark environment is suitable in various ways.
     """
     if _run("pgrep bitcoin", check_returncode=False)[2] == 0 and \
-            not NO_CAUTION:
+            not args.no_caution:
         raise RuntimeError(
             "benchmarks shouldn't run concurrently with unrelated bitcoin "
             "processes")
 
     if _run('cat /proc/swaps | grep -v "^Filename"',
-            check_returncode=False)[2] != 1 and not NO_CAUTION:
+            check_returncode=False)[2] != 1 and not args.no_caution:
         raise RuntimeError(
             "swap must be disabled during benchmarking")
 
@@ -271,12 +311,13 @@ def run_benches():
     """
     _startup_assertions()
 
-    if WORKDIR:
-        workdir = Path(WORKDIR)
+    if args.workdir:
+        workdir = Path(args.workdir)
     else:
         workdir = Path(tempfile.mkdtemp(prefix=(
             "bench-%s-%s-" %
-            (REPO_BRANCH, datetime.datetime.utcnow().strftime('%Y-%m-%d')))))
+            (args.repo_branch,
+             datetime.datetime.utcnow().strftime('%Y-%m-%d')))))
     RUN_DATA.workdir = workdir
 
     os.chdir(str(workdir))
@@ -284,18 +325,18 @@ def run_benches():
     if _shouldrun('gitclone'):
         _drop_caches()
         with timer("gitclone"):
-            _run("git clone -b %s %s" % (REPO_BRANCH, REPO_LOCATION))
+            _run("git clone -b %s %s" % (args.repo_branch, args.repo_location))
 
     os.chdir(str(workdir / 'bitcoin'))
 
-    if CHECKOUT_COMMIT:
-        _run("git checkout %s" % CHECKOUT_COMMIT)
+    if args.checkout_commit:
+        _run("git checkout %s" % args.checkout_commit)
 
     RUN_DATA.current_commit = subprocess.check_output(
         shlex.split('git rev-parse HEAD')).strip().decode()
     send_to_slack_attachment("Starting benchmark", {})
 
-    for compiler in ('clang', 'gcc'):
+    for compiler in args.compilers:
         if _shouldrun('build'):
             _run("./contrib/install_db4.sh .")
 
@@ -329,14 +370,15 @@ def run_benches():
 
             _drop_caches()
             _try_execute_and_report(
-                'build.make.1.%s' % compiler, "make -j 1",
+                'build.make.%s.%s' % (args.make_jobs, compiler),
+                "make -j %s" % args.make_jobs,
                 executable='make')
 
         if _shouldrun('makecheck'):
             _drop_caches()
             _try_execute_and_report(
-                'makecheck.%s.%s' % (compiler, NPROC - 1),
-                "make -j %s check" % (NPROC - 1),
+                'makecheck.%s.%s' % (compiler, args.nproc - 1),
+                "make -j %s check" % (args.nproc - 1),
                 num_tries=3, executable='make')
 
         if _shouldrun('functionaltests'):
@@ -391,16 +433,17 @@ def run_benches():
     addnode_config = (
         # If we aren't IBDing from random peers on the network, specify the
         # peer.
-        ('-addnode=%s' % IBD_PEER_ADDRESS) if not IBD_FROM_NETWORK else '')
+        ('-addnode=%s' % args.ibd_peer_address)
+        if not IBD_FROM_NETWORK else '')
 
     run_bitcoind_cmd = (
         './src/bitcoind -datadir=%s/bitcoin/data '
         '-dbcache=%s -txindex=1 '
         '%s -debug=all -stopatheight=%s '
         '-port=%s -rpcport=%s' % (
-            workdir, BITCOIND_DBCACHE, connect_config,
-            BITCOIND_STOPATHEIGHT,
-            BITCOIND_PORT, BITCOIND_RPCPORT
+            workdir, args.bitcoind_dbcache, connect_config,
+            args.bitcoind_stopatheight,
+            args.bitcoind_port, args.bitcoind_rpcport
         ))
 
     if _shouldrun('ibd'):
@@ -410,7 +453,8 @@ def run_benches():
             _drop_caches()
             _try_execute_and_report(
                 '%s.%s.dbcache=%s' % (
-                    ibd_bench_name, BITCOIND_STOPATHEIGHT, BITCOIND_DBCACHE),
+                    ibd_bench_name,
+                    args.bitcoind_stopatheight, args.bitcoind_dbcache),
                 '%s %s' % (run_bitcoind_cmd, addnode_config),
             )
 
@@ -418,7 +462,7 @@ def run_benches():
         _drop_caches()
         _try_execute_and_report(
             'reindex.%s.dbcache=%s' % (
-                BITCOIND_STOPATHEIGHT, BITCOIND_DBCACHE),
+                args.bitcoind_stopatheight, args.bitcoind_dbcache),
             '%s -reindex' % run_bitcoind_cmd)
 
 
@@ -439,11 +483,11 @@ def _clean_shutdown():
         logger.debug("shutdown: removed lockfile at %s", LOCKFILE_PATH)
 
     # Clean up to avoid filling disk
-    if RUN_DATA.workdir and not NO_TEARDOWN:
+    if RUN_DATA.workdir and not args.no_teardown:
         os.chdir(str(RUN_DATA.workdir / ".."))
         _run("rm -rf %s" % RUN_DATA.workdir)
         logger.debug("shutdown: removed workdir at %s", RUN_DATA.workdir)
-    elif NO_TEARDOWN:
+    elif args.no_teardown:
         logger.debug("shutdown: leaving workdir at %s", RUN_DATA.workdir)
 
 
@@ -471,7 +515,7 @@ def _popen(args, env=None):
 
 
 def _shouldrun(bench_name):
-    should = (not BENCHES_TO_RUN) or bench_name in BENCHES_TO_RUN
+    should = (not args.benches_to_run) or bench_name in args.benches_to_run
 
     if should:
         logger.info("Running benchmark '%s'" % bench_name)
@@ -569,11 +613,11 @@ def send_to_codespeed(
     # Mandatory fields
     data = {
         'commitid': RUN_DATA.current_commit,
-        'branch': REPO_BRANCH,
+        'branch': args.repo_branch,
         'project': 'Bitcoin Core',
         'executable': executable,
         'benchmark': bench_name,
-        'environment': CODESPEED_ENV_NAME,
+        'environment': args.codespeed_envname,
         'result_value': result,
         # Optional. Default is taken either from VCS integration or from
         # current date
@@ -593,12 +637,12 @@ def send_to_codespeed(
         "Attempting to send benchmark (%s, %s) to codespeed",
         bench_name, result)
 
-    if CODESPEED_NO_SEND:
+    if args.codespeed_no_send:
         return
 
     resp = requests.post(
-        CODESPEED_URL + '/result/add/',
-        data=data, auth=(CODESPEED_USER, CODESPEED_PASSWORD))
+        args.codespeed_url + '/result/add/',
+        data=data, auth=(args.codespeed_user, args.codespeed_password))
 
     if resp.status_code != 202:
         raise ValueError(
@@ -613,8 +657,8 @@ def send_to_slack_txt(txt):
 
 def send_to_slack_attachment(title, fields, text="", success=True):
     fields['Host'] = HOSTNAME
-    fields['Commit'] = RUN_DATA.current_commit[:6]
-    fields['Branch'] = REPO_BRANCH
+    fields['Commit'] = (RUN_DATA.current_commit or '')[:6]
+    fields['Branch'] = args.repo_branch
 
     data = {
         "attachments": [{
@@ -634,11 +678,11 @@ def send_to_slack_attachment(title, fields, text="", success=True):
 
 
 def _send_to_slack(slack_data):
-    if not SLACK_WEBHOOK_URL:
+    if not args.slack_webhook_url:
         return
 
     response = requests.post(
-        SLACK_WEBHOOK_URL, data=json.dumps(slack_data),
+        args.slack_webhook_url, data=json.dumps(slack_data),
         headers={'Content-Type': 'application/json'}
     )
     if response.status_code != 200:
@@ -687,3 +731,4 @@ if __name__ == '__main__':
         except Exception:
             send_to_slack_attachment(
                 "Error", {}, text=traceback.format_exc(), success=False)
+            raise
