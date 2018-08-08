@@ -320,7 +320,7 @@ def run_benches():
     """
     logger.info(
         "Running benchmarks %s with compilers %s",
-        args.benches_to_run or "[all]", args.compilers)
+        args.benches_to_run, args.compilers)
 
     _startup_assertions()
 
