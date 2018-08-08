@@ -77,7 +77,7 @@ USE_MEDIAN_BANDS = True  # True to enable median bands on Timeline view
 
 
 ALLOW_ANONYMOUS_POST = False  # Whether anonymous users can post results
-REQUIRE_SECURE_AUTH = DEBUG  # Whether auth needs to be over a secure channel
+REQUIRE_SECURE_AUTH = not DEBUG  # Whether auth needs to be over a secure channel
 # -----------------------------------------------------------------------------
 
 
