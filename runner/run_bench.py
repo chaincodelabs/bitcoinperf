@@ -63,6 +63,9 @@ addarg('synced-data-dir', '',
        '(see --bitcoind-stopatheight)')
 addarg('synced-bitcoin-repo-dir', os.environ['HOME'] + '/bitcoin',
        'Where the bitcoind binary which will serve blocks for IBD lives')
+addarg('synced-bitcoind-args', '',
+       'Additional arguments to pass to the bitcoind invocation for '
+       'the synced IBD peer, e.g. -minimumchainwork')
 addarg('codespeed-url', 'http://localhost:8000')
 addarg('slack-webhook-url', '')
 
@@ -219,8 +222,9 @@ def run_synced_bitcoind():
         # in /bitcoin_data; see runner/Dockerfile.
         "%s/src/bitcoind -datadir=%s "
         "-noconnect -listen=1 "
-        "-maxtipage=99999999999999" % (
+        "-maxtipage=99999999999999 %s" % (
             args.synced_bitcoin_repo_dir, args.synced_data_dir,
+            args.synced_bitcoind_args,
             ))
 
     logger.info(
@@ -309,6 +313,10 @@ def run_benches():
     Create a tmp directory in which we will clone bitcoin, build it, and run
     various benchmarks.
     """
+    logger.info(
+        "Running benchmarks %s with compilers %s",
+        args.benches_to_run or "[all]", args.compilers)
+
     _startup_assertions()
 
     if args.workdir:
@@ -330,6 +338,7 @@ def run_benches():
     os.chdir(str(workdir / 'bitcoin'))
 
     if args.checkout_commit:
+        logger.info("Checking out commit %s", args.checkout_commit)
         _run("git checkout %s" % args.checkout_commit)
 
     RUN_DATA.current_commit = subprocess.check_output(
