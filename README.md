@@ -30,9 +30,9 @@ and a benchmark up to height 10,000 will be run in test containers.
 
 ### Installation
 
-0. Obtain all the dependencies necessary to build Bitcoin Core. Obtain an up-to-date
+0. Obtain all the dependencies necessary to build Bitcoin Core as well as all
+   additional depedencies (see `runner/provision`). Obtain an up-to-date
    copy of the chain at some `$datadir` location.
-0. Install the additional requirements through your package manager: `time wget git python3-pip` (must be python3.6).
 0. Then, run `pip3 install -r runner/requirements.txt`.
 
 #### Starting codespeed
