@@ -43,11 +43,14 @@ BENCH_NAMES = {
 parser = argparse.ArgumentParser(description=__doc__)
 
 
-def addarg(name, default, help=None, type=str):
+def addarg(name, default, help='', *, type=str):
     envvar_name = name.upper().replace('-', '_')
+    default = os.environ.get(envvar_name, default)
+    if help and not help.endswith('.'):
+        help += '.'
     parser.add_argument(
-        '--%s' % name, default=os.environ.get(envvar_name, default),
-        help=help, type=type)
+        '--%s' % name, default=default,
+        help='{} Default overriden by {} env var (default: {})'.format(help, envvar_name, default) , type=type)
 
 
 addarg('repo-location', 'https://github.com/bitcoin/bitcoin.git')
@@ -71,10 +74,10 @@ def csv_type(s):
     return s.split(',')
 
 
-parser.add_argument(
-    '--benches-to-run', default='',
-    help=('Only run a subset of benchmarks. Options: %s' %
-          ', '.join(BENCH_NAMES)), type=csv_type)
+addarg(
+    'benches-to-run', default=', '.join(BENCH_NAMES),
+    help='Only run a subset of benchmarks',
+    type=csv_type)
 addarg('compilers', 'clang,gcc', type=csv_type)
 addarg('make-jobs', '1', type=int)
 
@@ -515,7 +518,7 @@ def _popen(args, env=None):
 
 
 def _shouldrun(bench_name):
-    should = (not args.benches_to_run) or bench_name in args.benches_to_run
+    should = bench_name in args.benches_to_run
 
     if should:
         logger.info("Running benchmark '%s'" % bench_name)
