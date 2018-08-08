@@ -1,18 +1,38 @@
 version: '3'
 
 services:
-  synced:
-    build:
-      context: ./runner
-    command: |
-      /bitcoin/src/bitcoind -datadir=/bitcoin_data -printtoconsole
-      -noconnect -listen=1
-      -maxtipage=9999999999999 
-    volumes:
-      - "${SYNCED_DATADIR}:/bitcoin_data"
+
+  # At the moment this is configured for local testing. Could probably tweak it
+  # into something production compatible if desired.
 
   bench:
     build:
       context: ./runner
-    env_file:
-      - ./runner/.env
+    environment:
+      - BITCOIND_STOPATHEIGHT=10000
+      - IBD_PEER_ADDRESS=localhost
+      - SYNCED_DATA_DIR=/bitcoin/data
+      - SYNCED_BITCOIN_REPO_DIR=/bitcoin
+      - CODESPEED_URL=http://codespeed:8000
+      - CODESPEED_USER=admin
+      - CODESPEED_PASSWORD=password
+      - CODESPEED_ENVNAME=ccl-bench-hdd-1
+      # Can't drop caches from within a container.
+      - NO_CAUTION=1
+      - MAKE_JOBS=5
+    volumes:
+      - .:/code
+
+    # Run an IBD to sync the chain up to a small test height, then run the
+    # bench.
+    command: >
+      bash -c "/bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole
+      -listen=0 -port=9999 -stopatheight=10000; /code/runner/run_bench.py"
+
+
+  codespeed:
+    build:
+      context: ./codespeed
+    environment:
+      - TESTING=1
+      - DEBUG=1
