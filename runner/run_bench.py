@@ -74,10 +74,10 @@ def csv_type(s):
     return s.split(',')
 
 
-parser.add_argument(
-    '--benches-to-run', default='',
-    help=('Only run a subset of benchmarks. Options: %s' %
-          ', '.join(BENCH_NAMES)), type=csv_type)
+addarg('benches-to-run', '',
+       help=('Only run a subset of benchmarks. Options: %s' %
+             ', '.join(BENCH_NAMES)),
+       type=csv_type)
 addarg('compilers', 'clang,gcc', type=csv_type)
 addarg('make-jobs', '1', type=int)
 
