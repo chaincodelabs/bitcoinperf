@@ -79,7 +79,7 @@ def csv_type(s):
 
 
 addarg(
-    'benches-to-run', default=', '.join(BENCH_NAMES),
+    'benches-to-run', default=','.join(BENCH_NAMES),
     help='Only run a subset of benchmarks',
     type=csv_type)
 
