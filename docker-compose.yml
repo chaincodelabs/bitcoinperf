@@ -17,12 +17,11 @@ services:
       - CODESPEED_USER=admin
       - CODESPEED_PASSWORD=password
       - CODESPEED_ENVNAME=ccl-bench-hdd-1
-      # Can't drop caches from within a container.
-      - NO_CAUTION=1
+      - NO_CAUTION=1  # Can't drop caches from within a container.
       - MAKE_JOBS=5
       - COMPILERS=clang
       - BENCHES_TO_RUN=gitclone,build,ibd,reindex
-      - CHECKOUT_COMMIT=84d5a6210c9c73c3e03d8b024887553051500b92
+      # - CHECKOUT_COMMIT=84d5a6210c9c73c3e03d8b024887553051500b92
       # Set minimumchainwork low so that we actually latch out of IBD at low
       # heights.
       - SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00

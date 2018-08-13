@@ -210,6 +210,22 @@ def timer(name: str):
 LOCKFILE_PATH = Path("/tmp/bitcoin_bench.lock")
 
 
+BENCH_SPECIFIC_BITCOIND_ARGS = (
+    # To "complete" (i.e. latch false out of) initialblockdownload for
+    # stopatheight for a lowish height, we need to set a very large maxtipage.
+    '-maxtipage=99999999999999999999 '
+
+    # If we don't set minimumchainwork to 0, low heights may cause the syncing
+    # peer to never download blocks and thus hang indefinitely during IBD.
+    # See https://github.com/bitcoin/bitcoin/blob/e83d82a85c53196aff5b5ac500f20bb2940663fa/src/net_processing.cpp#L517-L521
+    '-minimumchainwork=0x00 '
+
+    # Output buffering into memory during ps.communicate() can cause OOM errors
+    # on machines with small memory, so only output to debug.log files in disk.
+    '-printtoconsole=0 '
+)
+
+
 @contextlib.contextmanager
 def run_synced_bitcoind():
     """
@@ -225,11 +241,9 @@ def run_synced_bitcoind():
     bitcoinps = _popen(
         # Relies on bitcoind being precompiled and synced chain data existing
         # in /bitcoin_data; see runner/Dockerfile.
-        "%s/src/bitcoind -datadir=%s "
-        "-noconnect -listen=1 "
-        "-maxtipage=99999999999999 %s" % (
+        "%s/src/bitcoind -datadir=%s -noconnect -listen=1 %s %s" % (
             args.synced_bitcoin_repo_dir, args.synced_data_dir,
-            args.synced_bitcoind_args,
+            BENCH_SPECIFIC_BITCOIND_ARGS, args.synced_bitcoind_args,
             ))
 
     logger.info(
@@ -270,7 +284,7 @@ def run_synced_bitcoind():
     if not bitcoind_up:
         raise RuntimeError("Couldn't bring synced node up")
 
-    logger.info("synced node is active (pid %s)", bitcoinps.pid)
+    logger.info("synced node is active (pid %s) %s", bitcoinps.pid, info)
 
     try:
         yield
@@ -454,10 +468,11 @@ def run_benches():
         './src/bitcoind -datadir=%s/bitcoin/data '
         '-dbcache=%s -txindex=1 '
         '%s -debug=all -stopatheight=%s '
-        '-port=%s -rpcport=%s' % (
+        '-port=%s -rpcport=%s %s' % (
             workdir, args.bitcoind_dbcache, connect_config,
             args.bitcoind_stopatheight,
-            args.bitcoind_port, args.bitcoind_rpcport
+            args.bitcoind_port, args.bitcoind_rpcport,
+            BENCH_SPECIFIC_BITCOIND_ARGS,
         ))
 
     if _shouldrun('ibd'):
@@ -552,8 +567,9 @@ def _try_execute_and_report(
 
         (stdout, stderr) = ps.communicate()
         total_time = time.time() - start
-        stdout = stdout.decode()[:100000]
-        stderr = stderr.decode()[:100000]
+        # Get the last 10,000 characters of output.
+        stdout = stdout.decode()[-10000:]
+        stderr = stderr.decode()[-10000:]
 
         if (check_returncode and ps.returncode != 0) \
                 or check_for_failure(
