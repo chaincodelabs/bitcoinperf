@@ -327,6 +327,12 @@ def _startup_assertions():
             "Couldn't acquire lockfile %s; exiting", LOCKFILE_PATH)
 
 
+BENCH_PREFIX = (
+    "bench-%s-%s-" %
+    (args.repo_branch,
+     datetime.datetime.utcnow().strftime('%Y-%m-%d')))
+
+
 def run_benches():
     """
     Create a tmp directory in which we will clone bitcoin, build it, and run
@@ -341,10 +347,7 @@ def run_benches():
     if args.workdir:
         workdir = Path(args.workdir)
     else:
-        workdir = Path(tempfile.mkdtemp(prefix=(
-            "bench-%s-%s-" %
-            (args.repo_branch,
-             datetime.datetime.utcnow().strftime('%Y-%m-%d')))))
+        workdir = Path(tempfile.mkdtemp(prefix=BENCH_PREFIX))
     RUN_DATA.workdir = workdir
 
     os.chdir(str(workdir))
@@ -514,6 +517,11 @@ def _clean_shutdown():
     # Clean up to avoid filling disk
     if RUN_DATA.workdir and not args.no_teardown:
         os.chdir(str(RUN_DATA.workdir / ".."))
+
+        # Move the debug.log file out into /tmp for diagnostics.
+        _run("mv %s/bitcoin/data/debug.log /tmp/%s-debug.log" %
+             (RUN_DATA.workdir, BENCH_PREFIX))
+
         _run("rm -rf %s" % RUN_DATA.workdir)
         logger.debug("shutdown: removed workdir at %s", RUN_DATA.workdir)
     elif args.no_teardown:
