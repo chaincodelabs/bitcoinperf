@@ -90,6 +90,7 @@ addarg('checkout-commit', '', 'Test a particular branch, tag, or commit')
 
 addarg('bitcoind-dbcache', '2048' if MEM_GIB > 3 else '512')
 addarg('bitcoind-stopatheight', '522000')
+addarg('bitcoind-assumevalid', '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876')
 addarg('bitcoind-port', '9003')
 addarg('bitcoind-rpcport', '9004')
 addarg('log-level', 'DEBUG')
@@ -468,12 +469,12 @@ def run_benches():
         if not IBD_FROM_NETWORK else '')
 
     run_bitcoind_cmd = (
-        './src/bitcoind -datadir=%s/bitcoin/data '
-        '-dbcache=%s -txindex=1 '
-        '%s -debug=all -stopatheight=%s '
-        '-port=%s -rpcport=%s %s' % (
+        './src/bitcoind -datadir={}/bitcoin/data '
+        '-dbcache={} -txindex=1 '
+        '{} -debug=all -stopatheight={} -assumevalid={}'
+        '-port={} -rpcport={} {}'.format(
             workdir, args.bitcoind_dbcache, connect_config,
-            args.bitcoind_stopatheight,
+            args.bitcoind_stopatheight, args.bitcoind_assumevalid,
             args.bitcoind_port, args.bitcoind_rpcport,
             BENCH_SPECIFIC_BITCOIND_ARGS,
         ))
