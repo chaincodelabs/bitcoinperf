@@ -90,7 +90,9 @@ addarg('checkout-commit', '', 'Test a particular branch, tag, or commit')
 
 addarg('bitcoind-dbcache', '2048' if MEM_GIB > 3 else '512')
 addarg('bitcoind-stopatheight', '522000')
-addarg('bitcoind-assumevalid', '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876')
+addarg('bitcoind-assumevalid',
+       '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876',
+       help='Should be set to a known bock (e.g. the block hash of BITCOIND_STOPATHEIGHT) to make sure it is not set to a future block that we are not aware of')
 addarg('bitcoind-port', '9003')
 addarg('bitcoind-rpcport', '9004')
 addarg('log-level', 'DEBUG')
