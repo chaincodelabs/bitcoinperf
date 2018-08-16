@@ -473,7 +473,7 @@ def run_benches():
     run_bitcoind_cmd = (
         './src/bitcoind -datadir={}/bitcoin/data '
         '-dbcache={} -txindex=1 '
-        '{} -debug=all -stopatheight={} -assumevalid={}'
+        '{} -debug=all -stopatheight={} -assumevalid={} '
         '-port={} -rpcport={} {}'.format(
             workdir, args.bitcoind_dbcache, connect_config,
             args.bitcoind_stopatheight, args.bitcoind_assumevalid,
