@@ -54,6 +54,18 @@ def addarg(name, default, help='', *, type=str):
             help, envvar_name, default), type=type)
 
 
+def csv_type(s):
+    return s.split(',')
+
+
+def name_to_count_type(s):
+    out = {}
+    for i in s.split(','):
+        name, num = i.split(':')
+        out[name] = int(num)
+    return out
+
+
 addarg('repo-location', 'https://github.com/bitcoin/bitcoin.git')
 addarg('repo-branch', 'master', 'The branch to test')
 addarg('workdir', '',
@@ -72,12 +84,12 @@ addarg('synced-bitcoind-args', '',
        'the synced IBD peer, e.g. -minimumchainwork')
 addarg('codespeed-url', 'http://localhost:8000')
 addarg('slack-webhook-url', '')
-
-
-def csv_type(s):
-    return s.split(',')
-
-
+addarg(
+    'run-counts', '',
+    help=(
+        "Specify the number of times a benchmark should be run, e.g. "
+        "'ibd:3,microbench:2'"),
+    type=name_to_count_type)
 addarg(
     'benches-to-run', default=','.join(BENCH_NAMES),
     help='Only run a subset of benchmarks',
@@ -86,13 +98,18 @@ addarg(
 addarg('compilers', 'clang,gcc', type=csv_type)
 addarg('make-jobs', '1', type=int)
 
-addarg('checkout-commit', '', 'Test a particular branch, tag, or commit')
+addarg(
+    'commits', '',
+    help=("The branches, tags, or commits to test, e.g. 'master,my_change'"),
+    type=csv_type)
 
 addarg('bitcoind-dbcache', '2048' if MEM_GIB > 3 else '512')
 addarg('bitcoind-stopatheight', '522000')
 addarg('bitcoind-assumevalid',
        '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876',
-       help='Should be set to a known bock (e.g. the block hash of BITCOIND_STOPATHEIGHT) to make sure it is not set to a future block that we are not aware of')
+       help=('Should be set to a known bock (e.g. the block hash of '
+             'BITCOIND_STOPATHEIGHT) to make sure it is not set to a future '
+             'block that we are not aware of'))
 addarg('bitcoind-port', '9003')
 addarg('bitcoind-rpcport', '9004')
 addarg('log-level', 'DEBUG')
@@ -186,8 +203,19 @@ elif not args.ibd_peer_address:
         "This may result in inconsistent IBD times.")
 
 
+logger.info("Running with configuration:")
+logger.info("")
+for name, val in sorted(args.__dict__.items()):
+    logger.info("  {0:<26} {1:<40}".format(name, str(val)))
+logger.info("")
+
+
 class RunData:
+    """Data set at runtime for global reference."""
     current_commit = None
+
+    # The non-SHA name of the ref being tested.
+    current_ref = None
 
     # The working directory for this benchmark. Contains a `bitcoin/` subdir.
     workdir = None
@@ -195,17 +223,22 @@ class RunData:
     # Did we acquire the benchmarking lockfile?
     lockfile_acquired = False
 
+    compiler = None
+
 
 RUN_DATA = RunData()
 
-NAME_TO_TIME = defaultdict(list)
+NAME_TO_TIME = {
+    commit: defaultdict(list)
+    for commit in args.commits
+}
 
 
 @contextlib.contextmanager
 def timer(name: str):
     start = time.time()
     yield
-    NAME_TO_TIME[name].append(time.time() - start)
+    NAME_TO_TIME[RUN_DATA.current_ref][name].append(time.time() - start)
 
 
 # Maintain a lockfile that is global across the host to ensure that we're not
@@ -220,7 +253,7 @@ BENCH_SPECIFIC_BITCOIND_ARGS = (
 
     # If we don't set minimumchainwork to 0, low heights may cause the syncing
     # peer to never download blocks and thus hang indefinitely during IBD.
-    # See https://github.com/bitcoin/bitcoin/blob/e83d82a85c53196aff5b5ac500f20bb2940663fa/src/net_processing.cpp#L517-L521
+    # See https://github.com/bitcoin/bitcoin/blob/e83d82a85c53196aff5b5ac500f20bb2940663fa/src/net_processing.cpp#L517-L521  # noqa
     '-minimumchainwork=0x00 '
 
     # Output buffering into memory during ps.communicate() can cause OOM errors
@@ -261,9 +294,8 @@ def run_synced_bitcoind():
     while num_tries > 0 and bitcoinps.returncode is None and not bitcoind_up:
         info = None
         info_call = _run(
-            "%s/src/bitcoin-cli -datadir=%s "
-            "getblockchaininfo" %
-            (args.synced_bitcoin_repo_dir, args.synced_data_dir),
+            "{}/src/bitcoin-cli -datadir={} getblockchaininfo".format(
+                args.synced_bitcoin_repo_dir, args.synced_data_dir),
             check_returncode=False)
 
         if info_call[2] == 0:
@@ -336,6 +368,159 @@ BENCH_PREFIX = (
      datetime.datetime.utcnow().strftime('%Y-%m-%d')))
 
 
+def get_commits():
+    if not args.commits:
+        return ['HEAD']
+    return args.commits
+
+
+def get_times_to_run(bench_name):
+    return args.run_counts.get(bench_name, 1)
+
+
+def benchmark(name):
+    """A decorator used to declare benchmark steps.
+
+    Handles skipping and count-based execution."""
+    def wrapper(func):
+        def inner(*args_, **kwargs):
+            if name not in args.benches_to_run:
+                logger.debug("Skipping benchmark %r", name)
+            else:
+                count = get_times_to_run(name)
+                logger.info("Running benchmark %r %d times", name, count)
+                # Drop system caches to ensure fair runs.
+                _drop_caches()
+
+                for i in range(count):
+                    func(*args_, **kwargs)
+
+        return inner
+    return wrapper
+
+
+@benchmark('gitclone')
+def bench_gitclone():
+    with timer("gitclone"):
+        _run("git clone -b %s %s" % (args.repo_branch, args.repo_location))
+
+
+@benchmark('build')
+def bench_build():
+    _run("./contrib/install_db4.sh .")
+
+    my_env = os.environ.copy()
+    my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % RUN_DATA.workdir
+
+    _run("./autogen.sh")
+
+    configure_prefix = ''
+    if RUN_DATA.compiler == 'clang':
+        configure_prefix = 'CC=clang CXX=clang++ '
+    else:
+        _run('make distclean')  # Clean after clang run
+
+    boostflags = ''
+    armlib_path = '/usr/lib/arm-linux-gnueabihf/'
+
+    if Path(armlib_path).is_dir():
+        # On some architectures we need to manually specify this,
+        # otherwise configuring with clang can fail.
+        boostflags = '--with-boost-libdir=%s' % armlib_path
+
+    _run(
+        configure_prefix +
+        './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
+        'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
+        # Ensure ccache is disabled so that subsequent make runs
+        # are timed accurately.
+        '--disable-ccache ' + boostflags,
+        env=my_env)
+
+    _try_execute_and_report(
+        'build.make.%s.%s' % (args.make_jobs, RUN_DATA.compiler),
+        "make -j %s" % args.make_jobs,
+        executable='make')
+
+
+@benchmark('makecheck')
+def bench_makecheck():
+    _try_execute_and_report(
+        'makecheck.%s.%s' % (RUN_DATA.compiler, args.nproc - 1),
+        "make -j %s check" % (args.nproc - 1),
+        num_tries=3, executable='make')
+
+
+@benchmark('functionaltests')
+def bench_functests():
+    _try_execute_and_report(
+        'functionaltests.%s' % RUN_DATA.compiler,
+        "./test/functional/test_runner.py",
+        num_tries=3, executable='functional-test-runner')
+
+
+@benchmark('microbench')
+def bench_microbench():
+    with timer("microbench.%s" % RUN_DATA.compiler):
+        _drop_caches()
+        microbench_ps = _popen("./src/bench/bench_bitcoin")
+        (microbench_stdout,
+         microbench_stderr) = microbench_ps.communicate()
+
+    if microbench_ps.returncode != 0:
+        text = "stdout:\n%s\nstderr:\n%s" % (
+            microbench_stdout.decode(), microbench_stderr.decode())
+
+        send_to_slack_attachment(
+            "Microbench exited with code %s" %
+            microbench_ps.returncode, {}, text=text, success=False)
+
+    microbench_lines = [
+        # Skip the first line (header)
+        i.decode().split(', ')
+        for i in microbench_stdout.splitlines()[1:]]
+
+    for line in microbench_lines:
+        # Line strucure is
+        # "Benchmark, evals, iterations, total, min, max, median"
+        assert(len(line) == 7)
+        (bench, median, max_, min_) = (
+            line[0], float(line[-1]), float(line[-2]), float(line[-3]))
+        if not (max_ >= median >= min_):
+            logger.warning(
+                "%s has weird results: %s, %s, %s" %
+                (bench, max_, median, min_))
+            assert False
+        send_to_codespeed(
+            "micro.%s.%s" % (RUN_DATA.compiler, bench),
+            median, 'bench-bitcoin', result_max=max_, result_min=min_)
+
+
+@benchmark('ibd')
+def bench_ibd_and_reindex(run_bitcoind_cmd):
+    ibd_bench_name = 'ibd.real' if IBD_FROM_NETWORK else 'ibd.local'
+
+    # Ensure empty data before each IBD.
+    datadir = RUN_DATA.workdir / 'bitcoin' / 'data'
+    _run("rm -rf %s" % datadir, check_returncode=False)
+    if not datadir.exists():
+        datadir.mkdir()
+
+    with run_synced_bitcoind():
+        _try_execute_and_report(
+            '%s.%s.dbcache=%s' % (
+                ibd_bench_name,
+                args.bitcoind_stopatheight, args.bitcoind_dbcache),
+            run_bitcoind_cmd,
+        )
+
+    if 'reindex' in args.benches_to_run:
+        _try_execute_and_report(
+            'reindex.%s.dbcache=%s' % (
+                args.bitcoind_stopatheight, args.bitcoind_dbcache),
+            '%s -reindex' % run_bitcoind_cmd)
+
+
 def run_benches():
     """
     Create a tmp directory in which we will clone bitcoin, build it, and run
@@ -352,153 +537,51 @@ def run_benches():
     else:
         workdir = Path(tempfile.mkdtemp(prefix=BENCH_PREFIX))
     RUN_DATA.workdir = workdir
+    RUN_DATA.current_ref = args.repo_branch
 
     os.chdir(str(workdir))
 
-    if _shouldrun('gitclone'):
-        _drop_caches()
-        with timer("gitclone"):
-            _run("git clone -b %s %s" % (args.repo_branch, args.repo_location))
+    bench_gitclone()
 
     os.chdir(str(workdir / 'bitcoin'))
 
-    if args.checkout_commit:
-        logger.info("Checking out commit %s", args.checkout_commit)
-        _run("git checkout %s" % args.checkout_commit)
+    for commit in get_commits():
+        if commit != 'HEAD':
+            logger.info("Checking out commit %s", commit)
+            _run("git checkout %s" % commit)
 
-    RUN_DATA.current_commit = subprocess.check_output(
-        shlex.split('git rev-parse HEAD')).strip().decode()
-    send_to_slack_attachment("Starting benchmark", {})
+        RUN_DATA.current_ref = commit
+        RUN_DATA.current_commit = subprocess.check_output(
+            shlex.split('git rev-parse HEAD')).strip().decode()
+        send_to_slack_attachment("Starting benchmark", {})
 
-    for compiler in args.compilers:
-        if _shouldrun('build'):
-            _run("./contrib/install_db4.sh .")
+        for compiler in args.compilers:
+            RUN_DATA.compiler = compiler
+            bench_build()
+            bench_makecheck()
+            bench_functests()
+            bench_microbench()
 
-            my_env = os.environ.copy()
-            my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % workdir
+        connect_config = '-listen=0' if IBD_FROM_NETWORK else '-connect=0'
+        addnode_config = (
+            # If we aren't IBDing from random peers on the network, specify the
+            # peer.
+            ('-addnode=%s' % args.ibd_peer_address)
+            if not IBD_FROM_NETWORK else '')
 
-            _run("./autogen.sh")
+        run_bitcoind_cmd = (
+            './src/bitcoind -datadir={}/bitcoin/data '
+            '-dbcache={} -txindex=1 '
+            '{} -debug=all -stopatheight={} -assumevalid={} '
+            '-port={} -rpcport={} {} {}'.format(
+                workdir, args.bitcoind_dbcache, connect_config,
+                args.bitcoind_stopatheight, args.bitcoind_assumevalid,
+                args.bitcoind_port, args.bitcoind_rpcport,
+                addnode_config,
+                BENCH_SPECIFIC_BITCOIND_ARGS,
+            ))
 
-            configure_prefix = ''
-            if compiler == 'clang':
-                configure_prefix = 'CC=clang CXX=clang++ '
-            else:
-                _run('make distclean')  # Clean after clang run
-
-            boostflags = ''
-            armlib_path = '/usr/lib/arm-linux-gnueabihf/'
-
-            if Path(armlib_path).is_dir():
-                # On some architectures we need to manually specify this,
-                # otherwise configuring with clang can fail.
-                boostflags = '--with-boost-libdir=%s' % armlib_path
-
-            _run(
-                configure_prefix +
-                './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-                'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
-                # Ensure ccache is disabled so that subsequent make runs are
-                # timed accurately.
-                '--disable-ccache ' + boostflags,
-                env=my_env)
-
-            _drop_caches()
-            _try_execute_and_report(
-                'build.make.%s.%s' % (args.make_jobs, compiler),
-                "make -j %s" % args.make_jobs,
-                executable='make')
-
-        if _shouldrun('makecheck'):
-            _drop_caches()
-            _try_execute_and_report(
-                'makecheck.%s.%s' % (compiler, args.nproc - 1),
-                "make -j %s check" % (args.nproc - 1),
-                num_tries=3, executable='make')
-
-        if _shouldrun('functionaltests'):
-            _drop_caches()
-            _try_execute_and_report(
-                'functionaltests.%s' % compiler,
-                "./test/functional/test_runner.py",
-                num_tries=3, executable='functional-test-runner')
-
-        if _shouldrun('microbench'):
-            with timer("microbench.%s" % compiler):
-                _drop_caches()
-                microbench_ps = _popen("./src/bench/bench_bitcoin")
-                (microbench_stdout,
-                 microbench_stderr) = microbench_ps.communicate()
-
-            if microbench_ps.returncode != 0:
-                text = "stdout:\n%s\nstderr:\n%s" % (
-                    microbench_stdout.decode(), microbench_stderr.decode())
-
-                send_to_slack_attachment(
-                    "Microbench exited with code %s" %
-                    microbench_ps.returncode, {}, text=text, success=False)
-
-            microbench_lines = [
-                # Skip the first line (header)
-                i.decode().split(', ')
-                for i in microbench_stdout.splitlines()[1:]]
-
-            for line in microbench_lines:
-                # Line strucure is
-                # "Benchmark, evals, iterations, total, min, max, median"
-                assert(len(line) == 7)
-                (bench, median, max_, min_) = (
-                    line[0], float(line[-1]), float(line[-2]), float(line[-3]))
-                if not (max_ >= median >= min_):
-                    logger.warning(
-                        "%s has weird results: %s, %s, %s" %
-                        (bench, max_, median, min_))
-                    assert False
-                send_to_codespeed(
-                    "micro.%s.%s" % (compiler, bench),
-                    median, 'bench-bitcoin', result_max=max_, result_min=min_)
-
-    datadir = workdir / 'bitcoin' / 'data'
-    _run("rm -rf %s" % datadir, check_returncode=False)
-    if not datadir.exists():
-        datadir.mkdir()
-
-    connect_config = (
-        '-listen=0' if IBD_FROM_NETWORK else '-connect=0')
-    addnode_config = (
-        # If we aren't IBDing from random peers on the network, specify the
-        # peer.
-        ('-addnode=%s' % args.ibd_peer_address)
-        if not IBD_FROM_NETWORK else '')
-
-    run_bitcoind_cmd = (
-        './src/bitcoind -datadir={}/bitcoin/data '
-        '-dbcache={} -txindex=1 '
-        '{} -debug=all -stopatheight={} -assumevalid={} '
-        '-port={} -rpcport={} {}'.format(
-            workdir, args.bitcoind_dbcache, connect_config,
-            args.bitcoind_stopatheight, args.bitcoind_assumevalid,
-            args.bitcoind_port, args.bitcoind_rpcport,
-            BENCH_SPECIFIC_BITCOIND_ARGS,
-        ))
-
-    if _shouldrun('ibd'):
-        ibd_bench_name = 'ibd.real' if IBD_FROM_NETWORK else 'ibd.local'
-
-        with run_synced_bitcoind():
-            _drop_caches()
-            _try_execute_and_report(
-                '%s.%s.dbcache=%s' % (
-                    ibd_bench_name,
-                    args.bitcoind_stopatheight, args.bitcoind_dbcache),
-                '%s %s' % (run_bitcoind_cmd, addnode_config),
-            )
-
-    if _shouldrun('reindex'):
-        _drop_caches()
-        _try_execute_and_report(
-            'reindex.%s.dbcache=%s' % (
-                args.bitcoind_stopatheight, args.bitcoind_dbcache),
-            '%s -reindex' % run_bitcoind_cmd)
+        bench_ibd_and_reindex(run_bitcoind_cmd)
 
 
 def _try_acquire_lockfile():
@@ -518,17 +601,20 @@ def _clean_shutdown():
         logger.debug("shutdown: removed lockfile at %s", LOCKFILE_PATH)
 
     # Clean up to avoid filling disk
-    if RUN_DATA.workdir and not args.no_teardown:
+    if RUN_DATA.workdir and not args.no_teardown and RUN_DATA.workdir.is_dir():
         os.chdir(str(RUN_DATA.workdir / ".."))
-
-        # Move the debug.log file out into /tmp for diagnostics.
-        _run("mv %s/bitcoin/data/debug.log /tmp/%s-debug.log" %
-             (RUN_DATA.workdir, BENCH_PREFIX))
-
+        _stash_debug_file()
         _run("rm -rf %s" % RUN_DATA.workdir)
         logger.debug("shutdown: removed workdir at %s", RUN_DATA.workdir)
     elif args.no_teardown:
         logger.debug("shutdown: leaving workdir at %s", RUN_DATA.workdir)
+
+
+def _stash_debug_file():
+    # Move the debug.log file out into /tmp for diagnostics.
+    debug_file = RUN_DATA.workdir / "/bitcoin/data/debug.log"
+    if debug_file.is_file():
+        debug_file.rename(Path("/tmp/{}debug.log".format(BENCH_PREFIX)))
 
 
 atexit.register(_clean_shutdown)
@@ -554,15 +640,6 @@ def _popen(args, env=None):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
 
 
-def _shouldrun(bench_name):
-    should = bench_name in args.benches_to_run
-
-    if should:
-        logger.info("Running benchmark '%s'" % bench_name)
-
-    return should
-
-
 def _try_execute_and_report(
         bench_name, cmd, *, report_memory=True, report_time=True, num_tries=1,
         check_returncode=True, executable='bitcoind'):
@@ -586,8 +663,8 @@ def _try_execute_and_report(
                 or check_for_failure(
                     bench_name, stdout, stderr, total_time_secs=total_time):
             logger.error(
-                "[%s] command '%s' failed\nstdout:\n%s\nstderr:\n%s",
-                bench_name, cmd, stdout, stderr)
+                "[%s] command failed\nstdout:\n%s\nstderr:\n%s",
+                bench_name, stdout, stderr)
 
             if i == (num_tries - 1):
                 return False
@@ -599,21 +676,21 @@ def _try_execute_and_report(
     memusage = int(stderr.strip().split('\n')[-1])
 
     logger.info(
-        "[%s] command '%s' finished successfully "
+        "[%s] command finished successfully "
         "with maximum resident set size %.3f MiB",
-        bench_name, cmd, memusage / 1024)
+        bench_name, memusage / 1024)
 
     mem_name = bench_name + '.mem-usage'
-    NAME_TO_TIME[mem_name].append(memusage)
+    NAME_TO_TIME[RUN_DATA.current_ref][mem_name].append(memusage)
     if report_memory:
         send_to_codespeed(
             mem_name, memusage, executable, units_title='Size', units='KiB')
 
     logger.info(
-        "[%s] command '%s' finished successfully in %.3f seconds (%s)",
-        bench_name, cmd, total_time, datetime.timedelta(seconds=total_time))
+        "[%s] command finished successfully in %.3f seconds (%s)",
+        bench_name, total_time, datetime.timedelta(seconds=total_time))
 
-    NAME_TO_TIME[bench_name].append(total_time)
+    NAME_TO_TIME[RUN_DATA.current_ref][bench_name].append(total_time)
     if report_time:
         send_to_codespeed(bench_name, total_time, executable)
 
@@ -759,6 +836,29 @@ def get_times_table(name_to_times_map):
     return timestr
 
 
+def get_comparative_times_table(commits_to_benches):
+    print(commits_to_benches)
+    print("\nAbsolute measurements:\n")
+    print(("{:>45}" + (" {:<36}" * len(commits_to_benches))).format(
+        "", *commits_to_benches.keys()))
+
+    bench_rows = defaultdict(list)
+
+    for commit, benches in commits_to_benches.items():
+        for bench, values in benches.items():
+            bench_rows[bench].append(sum(values) / len(values))
+
+    for bench, row in bench_rows.items():
+        print(("{:>45}" + (" {:<36}" * len(row))).format(bench, *row))
+
+    print("\nRelative measurements:\n")
+
+    for bench, row in bench_rows.items():
+        minval = min(row)
+        normrow = [i/minval for i in row]
+        print(("{:>45}" + (" {:<36}" * len(normrow))).format(bench, *normrow))
+
+
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test':
         import doctest
@@ -766,9 +866,14 @@ if __name__ == '__main__':
     else:
         try:
             run_benches()
-            timestr = get_times_table(NAME_TO_TIME)
-            print(timestr)
-            send_to_slack_attachment("Benchmark complete", {}, text=timestr)
+
+            if len(args.commits) <= 1:
+                timestr = get_times_table(NAME_TO_TIME[RUN_DATA.current_ref])
+                print(timestr)
+                send_to_slack_attachment(
+                    "Benchmark complete", {}, text=timestr)
+            else:
+                print(get_comparative_times_table(NAME_TO_TIME))
         except Exception:
             send_to_slack_attachment(
                 "Error", {}, text=traceback.format_exc(), success=False)

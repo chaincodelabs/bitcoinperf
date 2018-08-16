@@ -4,13 +4,24 @@ services:
 
   # At the moment this is configured for local testing. Could probably tweak it
   # into something production compatible if desired.
+  #
+
+  synced:
+    image: runner
+    build:
+      context: ./runner
+    volumes:
+      - /data/bitcoin_bench:/bitcoin/data
+    command: >
+      /bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole -noconnect -listen=1 -maxtipage=9999999999999999999999999
 
   bench:
+    image: runner
     build:
       context: ./runner
     environment:
-      - BITCOIND_STOPATHEIGHT=10000
-      - IBD_PEER_ADDRESS=localhost
+      - BITCOIND_STOPATHEIGHT=230000
+      - IBD_PEER_ADDRESS=synced
       - SYNCED_DATA_DIR=/bitcoin/data
       - SYNCED_BITCOIN_REPO_DIR=/bitcoin
       - CODESPEED_URL=http://codespeed:8000
@@ -28,16 +39,11 @@ services:
     volumes:
       - .:/code
 
-    # Run an IBD to sync the chain up to a small test height, then run the
-    # bench.
-    command: >
-      bash -c "/bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole
-      -listen=0 -port=9999 -stopatheight=10000; /code/runner/run_bench.py"
-
-
   codespeed:
     build:
       context: ./codespeed
+    ports:
+      - "8000:8000"
     environment:
       - TESTING=1
       - DEBUG=1
