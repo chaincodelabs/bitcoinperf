@@ -27,7 +27,7 @@ import sys
 import getpass
 import multiprocessing
 import traceback
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from pathlib import Path
 
 
@@ -119,6 +119,9 @@ addarg('no-teardown', False,
 addarg('no-caution', False,
        "If true, don't perform a variety of startup checks and cache drops",
        type=bool)
+addarg('no-clean', False,
+       "If true, do not call `make distclean` before builds. Useful for when "
+       "you don't care about build times.", type=bool)
 addarg('codespeed-no-send', False,
        "If true, don't send data to codespeed", type=bool)
 addarg('codespeed-user', '')
@@ -417,8 +420,11 @@ def bench_build():
     configure_prefix = ''
     if RUN_DATA.compiler == 'clang':
         configure_prefix = 'CC=clang CXX=clang++ '
-    else:
-        _run('make distclean')  # Clean after clang run
+
+    # Ensure build is clean.
+    makefile_path = RUN_DATA.workdir / 'bitcoin' / 'Makefile'
+    if makefile_path.is_file() and not args.no_clean:
+        _run('make distclean')
 
     boostflags = ''
     armlib_path = '/usr/lib/arm-linux-gnueabihf/'
@@ -810,6 +816,13 @@ def _send_to_slack(slack_data):
         )
 
 
+def format_val(bench_name, val):
+    if 'mem-usage' in bench_name:
+        return "%sMiB" % (int(val) / 1000.)
+    else:
+        return str(datetime.timedelta(seconds=float(val)))
+
+
 def get_times_table(name_to_times_map):
     """
     >>> print(get_times_table(
@@ -826,37 +839,47 @@ def get_times_table(name_to_times_map):
     timestr = "\n"
     for name, times in sorted(name_to_times_map.items()):
         for time_ in times:
-            val = str(datetime.timedelta(seconds=float(time_)))
-
-            if 'mem-usage' in name:
-                val = "%sMiB" % (int(time_) / 1000.)
-
-            timestr += "{0}: {1}\n".format(name, val)
+            timestr += "{0}: {1}\n".format(name, format_val(name, time_))
 
     return timestr
 
 
-def get_comparative_times_table(commits_to_benches):
+class BenchVal(namedtuple('BenchVal', 'name,values')):
+    @property
+    def count(self): return len(self.values)
+
+    @property
+    def avg(self): return sum(self.values) / self.count
+
+    def format(self, val=None):
+        return "{} (x{})".format(
+            format_val(self.name, val or self.avg), self.count)
+
+
+def print_comparative_times_table(commits_to_benches):
     print(commits_to_benches)
+    print()
     print("\nAbsolute measurements:\n")
-    print(("{:>45}" + (" {:<36}" * len(commits_to_benches))).format(
+    print(("{:<45}" + (" {:<24}" * len(commits_to_benches))).format(
         "", *commits_to_benches.keys()))
+    print()
 
     bench_rows = defaultdict(list)
 
     for commit, benches in commits_to_benches.items():
-        for bench, values in benches.items():
-            bench_rows[bench].append(sum(values) / len(values))
+        for bench, values in sorted(benches.items()):
+            bench_rows[bench].append(BenchVal(bench, values))
 
     for bench, row in bench_rows.items():
-        print(("{:>45}" + (" {:<36}" * len(row))).format(bench, *row))
+        print(("{:<45}" + (" {:<24}" * len(row))).format(
+            bench, *[r.format() for r in row]))
 
     print("\nRelative measurements:\n")
 
     for bench, row in bench_rows.items():
-        minval = min(row)
-        normrow = [i/minval for i in row]
-        print(("{:>45}" + (" {:<36}" * len(normrow))).format(bench, *normrow))
+        minval = min([r.avg for r in row])
+        normrow = ["{} (x{})".format(i.avg / minval, i.count) for i in row]
+        print(("{:<45}" + (" {:<24}" * len(normrow))).format(bench, *normrow))
 
 
 if __name__ == '__main__':
@@ -873,7 +896,7 @@ if __name__ == '__main__':
                 send_to_slack_attachment(
                     "Benchmark complete", {}, text=timestr)
             else:
-                print(get_comparative_times_table(NAME_TO_TIME))
+                print_comparative_times_table(NAME_TO_TIME)
         except Exception:
             send_to_slack_attachment(
                 "Error", {}, text=traceback.format_exc(), success=False)
