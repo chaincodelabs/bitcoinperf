@@ -31,17 +31,18 @@ class BenchVal(namedtuple('BenchVal', 'name,values')):
 def print_comparative_times_table(commits_to_benches, pfile=sys.stdout):
     print(file=pfile)
     writer = pytablewriter.MarkdownTableWriter()
-    vs_str = ("{}" + (" vs. {}" * (len(commits_to_benches) - 1))).format(
-        *commits_to_benches.keys())
+    items = sorted(commits_to_benches.items())
+    commits = [i[0] for i in items]
+    vs_str = ("{}" + (" vs. {}" * (len(commits) - 1))).format(*commits)
     writer.table_name = vs_str + " (absolute)"
-    writer.header_list = ["name", "iterations", *commits_to_benches.keys()]
+    writer.header_list = ["name", "iterations", *commits]
     writer.value_matrix = []
     writer.margin = 1
     writer.stream = pfile
 
     bench_rows = defaultdict(list)
 
-    for commit, benches in commits_to_benches.items():
+    for commit, benches in items:
         for bench, values in sorted(benches.items()):
             bench_rows[bench].append(BenchVal(bench, values))
 
