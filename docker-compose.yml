@@ -6,19 +6,11 @@ services:
   # into something production compatible if desired.
   #
 
-  synced:
-    image: runner
-    build:
-      context: ./runner
-    volumes:
-      - /data/bitcoin_bench:/bitcoin/data
-    command: >
-      /bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole -noconnect -listen=1 -maxtipage=9999999999999999999999999
-
   bench:
     image: runner
     build:
-      context: ./runner
+      context: .
+      dockerfile: ./runner/Dockerfile
     environment:
       - BITCOIND_STOPATHEIGHT=230000
       - IBD_PEER_ADDRESS=synced
@@ -32,12 +24,18 @@ services:
       - MAKE_JOBS=5
       - COMPILERS=clang
       - BENCHES_TO_RUN=gitclone,build,ibd,reindex
-      # - CHECKOUT_COMMIT=84d5a6210c9c73c3e03d8b024887553051500b92
       # Set minimumchainwork low so that we actually latch out of IBD at low
       # heights.
       - SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00
     volumes:
       - .:/code
+
+  synced:
+    image: runner
+    volumes:
+      - /data/bitcoin_bench:/bitcoin/data
+    command: >
+      /bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole -noconnect -listen=1 -maxtipage=9999999999999999999999999
 
   codespeed:
     build:
