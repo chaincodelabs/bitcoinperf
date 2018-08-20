@@ -36,6 +36,10 @@ Install docker & docker-compose, then run
 
 $ docker-compose up -d codespeed synced
 
+# Modify docker-compose.yml to reference a synced datadir on your host machine.
+
+$ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.yml
+
 # Compare v0.16.0 to the current tip
 
 $ docker-compose run --rm bench \
