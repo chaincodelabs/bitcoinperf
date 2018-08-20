@@ -346,7 +346,7 @@ def _startup_assertions():
     """
     Ensure the benchmark environment is suitable in various ways.
     """
-    if _run("pgrep bitcoin | grep -v bitcoinperf",
+    if _run("pgrep --list-name bitcoin | grep -v bitcoinperf",
             check_returncode=False)[2] == 0 and \
             not args.no_caution:
         raise RuntimeError(
