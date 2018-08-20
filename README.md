@@ -16,57 +16,34 @@ The benchmarks which are monitored are
 - IBD up to some height from a local peer or from the P2P network
 - Reindex up to some height
 
+The Python script (`runner/run_bench.py`) may be used as a standalone script
+(in conjunction with the Docker configuration) to benchmark and compare
+different Bitcoin commits locally - without necessarily writing to a remote
+codespeed instance.
 
-### Testing
+
+### Example local usage
+
+First, you may have to modify the `synced` mountpoint in `docker-compose.yml`
+from `/data/bitcoin_bench` to a path on your machine that corresponds to a
+Bitcoin datadir which is synced up to your desired stopatheight.
 
 Install docker & docker-compose, then run
 
+#
 ```sh
-$ docker-compose build
-$ docker-compose up
+# Bring up codespeed server and a synced bitcoind instance
+
+$ docker-compose up -d codespeed synced
+
+# Compare v0.16.0 to the current tip
+
+$ docker-compose run --rm bench \
+    ./runner/run_bench.py --commits "v0.16.0,master"
+    --no-clean=1 \
+    --run-counts ibd:3 \
+    --benches-to-run gitclone,build,ibd \
+    --log-level INFO \
+    --bitcoind-stopatheight 200000
+
 ```
-
-and a benchmark up to height 10,000 will be run in test containers.
-
-### Installation
-
-0. Obtain all the dependencies necessary to build Bitcoin Core as well as all
-   additional depedencies (see `runner/provision`). Obtain an up-to-date
-   copy of the chain at some `$datadir` location.
-0. Then, run `pip3 install -r runner/requirements.txt`.
-
-#### Starting codespeed
-
-0. `cd codespeed && pip install --user -r requirements.txt`
-0. Initialize the codespeed DB: `python manage.py migrate`
-0. Create an admin user (for posting results): `python manage.py createsuperuser`
-0. Load required initial data:
-   `python manage.py shell < ./codespeed/initialize_data.py`
-0. In a separate terminal window, start the development server: `python
-   manage.py runserver 0.0.0.0:8000`
-0. Browse to http://localhost:8000 and ensure codespeed is up.
-
-
-#### Starting the synced peer
-
-0. [assuming you have obtained a relatively up-to-date chain in `$datadir`]
-0. In a separate terminal window, run `./bin/start_synced $datadir`
-0. Ensure the peer is up by running
-   `/path/to/bitcoin-cli -rpcport=9001 -datadir="${datadir}" getblockchaininfo`.
-
-
-#### Running the benchmarks
-
-0. Run `./bin/run_bench`.
-
-
-### Running a subset of benches
-
-Use the `BENCHES_TO_RUN` envvar when invoking `runner/run_bench.py` to only
-run certain benchmarks.
-
-### Running to a height
-
-Use the `BITCOIND_STOPATHEIGHT` envvar when invoking `runner/run_bench.py` to
-control the height to sync to. This will automatically be reflected in the name
-of the benchmarks which are generated.
