@@ -4,10 +4,6 @@ Run a series of benchmarks against a particular Bitcoin Core revision.
 
 See bin/run_bench for a sample invocation.
 
-To run doctests:
-
-    ./runner/run_bench.py test
-
 """
 
 import argparse
@@ -27,8 +23,10 @@ import sys
 import getpass
 import multiprocessing
 import traceback
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from pathlib import Path
+
+from . import output
 
 
 # Get physical memory specs
@@ -59,6 +57,8 @@ def csv_type(s):
 
 
 def name_to_count_type(s):
+    if not s:
+        return {}
     out = {}
     for i in s.split(','):
         name, num = i.split(':')
@@ -82,7 +82,7 @@ addarg('synced-bitcoin-repo-dir', os.environ['HOME'] + '/bitcoin',
 addarg('synced-bitcoind-args', '',
        'Additional arguments to pass to the bitcoind invocation for '
        'the synced IBD peer, e.g. -minimumchainwork')
-addarg('codespeed-url', 'http://localhost:8000')
+addarg('codespeed-url', '')
 addarg('slack-webhook-url', '')
 addarg(
     'run-counts', '',
@@ -122,8 +122,6 @@ addarg('no-caution', False,
 addarg('no-clean', False,
        "If true, do not call `make distclean` before builds. Useful for when "
        "you don't care about build times.", type=bool)
-addarg('codespeed-no-send', False,
-       "If true, don't send data to codespeed", type=bool)
 addarg('codespeed-user', '')
 addarg('codespeed-password', '')
 addarg('codespeed-envname', {
@@ -140,7 +138,7 @@ args.compilers = list(sorted(args.compilers))
 
 
 def check_args(args):
-    if not args.codespeed_no_send:
+    if args.codespeed_url:
         assert(args.codespeed_user)
         assert(args.codespeed_password)
         assert(args.codespeed_envname)
@@ -156,7 +154,8 @@ def check_args(args):
             sys.exit(1)
 
 
-check_args(args)
+if __name__ == '__main__':
+    check_args(args)
 
 
 class SlackLogHandler(logging.Handler):
@@ -761,7 +760,7 @@ def send_to_codespeed(
         "Attempting to send benchmark (%s, %s) to codespeed",
         bench_name, result)
 
-    if args.codespeed_no_send:
+    if not args.codespeed_url:
         return
 
     resp = requests.post(
@@ -816,88 +815,19 @@ def _send_to_slack(slack_data):
         )
 
 
-def format_val(bench_name, val):
-    if 'mem-usage' in bench_name:
-        return "%sMiB" % (int(val) / 1000.)
-    else:
-        return str(datetime.timedelta(seconds=float(val)))
+def main():
+    try:
+        run_benches()
 
-
-def get_times_table(name_to_times_map):
-    """
-    >>> print(get_times_table(
-    ...    {'a': [1, 2, 3], 'foo': [2.3], 'b.mem-usage': [3000]}))
-    <BLANKLINE>
-    a: 0:00:01
-    a: 0:00:02
-    a: 0:00:03
-    b.mem-usage: 3.0MiB
-    foo: 0:00:02.300000
-    <BLANKLINE>
-
-    """
-    timestr = "\n"
-    for name, times in sorted(name_to_times_map.items()):
-        for time_ in times:
-            timestr += "{0}: {1}\n".format(name, format_val(name, time_))
-
-    return timestr
-
-
-class BenchVal(namedtuple('BenchVal', 'name,values')):
-    @property
-    def count(self): return len(self.values)
-
-    @property
-    def avg(self): return sum(self.values) / self.count
-
-    def format(self, val=None):
-        return "{} (x{})".format(
-            format_val(self.name, val or self.avg), self.count)
-
-
-def print_comparative_times_table(commits_to_benches):
-    print(commits_to_benches)
-    print()
-    print("\nAbsolute measurements:\n")
-    print(("{:<45}" + (" {:<24}" * len(commits_to_benches))).format(
-        "", *commits_to_benches.keys()))
-    print()
-
-    bench_rows = defaultdict(list)
-
-    for commit, benches in commits_to_benches.items():
-        for bench, values in sorted(benches.items()):
-            bench_rows[bench].append(BenchVal(bench, values))
-
-    for bench, row in bench_rows.items():
-        print(("{:<45}" + (" {:<24}" * len(row))).format(
-            bench, *[r.format() for r in row]))
-
-    print("\nRelative measurements:\n")
-
-    for bench, row in bench_rows.items():
-        minval = min([r.avg for r in row])
-        normrow = ["{} (x{})".format(i.avg / minval, i.count) for i in row]
-        print(("{:<45}" + (" {:<24}" * len(normrow))).format(bench, *normrow))
-
-
-if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'test':
-        import doctest
-        doctest.testmod()
-    else:
-        try:
-            run_benches()
-
-            if len(args.commits) <= 1:
-                timestr = get_times_table(NAME_TO_TIME[RUN_DATA.current_ref])
-                print(timestr)
-                send_to_slack_attachment(
-                    "Benchmark complete", {}, text=timestr)
-            else:
-                print_comparative_times_table(NAME_TO_TIME)
-        except Exception:
+        if len(args.commits) <= 1:
+            timestr = output.get_times_table(
+                NAME_TO_TIME[RUN_DATA.current_ref])
+            print(timestr)
             send_to_slack_attachment(
-                "Error", {}, text=traceback.format_exc(), success=False)
-            raise
+                "Benchmark complete", {}, text=timestr)
+        else:
+            output.print_comparative_times_table(NAME_TO_TIME)
+    except Exception:
+        send_to_slack_attachment(
+            "Error", {}, text=traceback.format_exc(), success=False)
+        raise

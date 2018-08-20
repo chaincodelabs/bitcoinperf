@@ -1,6 +1,6 @@
 FROM debian:9-slim
 
-COPY provision /usr/bin/provision
+COPY runner/provision /usr/bin/provision
 RUN /usr/bin/provision
 RUN git clone -b v0.16.1 https://github.com/bitcoin/bitcoin.git /bitcoin
 WORKDIR /bitcoin
@@ -12,5 +12,6 @@ RUN ./contrib/install_db4.sh . && \
   make -j $(($(nproc) - 1))
 
 WORKDIR /code
-COPY * /code/
-RUN pip3 install -r requirements.txt
+COPY setup.py /code/
+COPY runner /code/runner
+RUN pip3 install --upgrade -e . && pip3 install nose

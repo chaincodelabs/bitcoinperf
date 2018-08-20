@@ -16,7 +16,7 @@ The benchmarks which are monitored are
 - IBD up to some height from a local peer or from the P2P network
 - Reindex up to some height
 
-The Python script (`runner/run_bench.py`) may be used as a standalone script
+The Python script (`bitcoinperf`) may be used as a standalone script
 (in conjunction with the Docker configuration) to benchmark and compare
 different Bitcoin commits locally - without necessarily writing to a remote
 codespeed instance.
@@ -39,7 +39,7 @@ $ docker-compose up -d codespeed synced
 # Compare v0.16.0 to the current tip
 
 $ docker-compose run --rm bench \
-    ./runner/run_bench.py --commits "v0.16.0,master"
+    bitcoinperf --commits "v0.16.0,master"
     --no-clean=1 \
     --run-counts ibd:3 \
     --benches-to-run gitclone,build,ibd \
