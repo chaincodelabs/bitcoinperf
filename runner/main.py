@@ -230,10 +230,8 @@ class RunData:
 
 RUN_DATA = RunData()
 
-NAME_TO_TIME = {
-    commit: defaultdict(list)
-    for commit in args.commits
-}
+# TODO Actually, commit name -> {bench name -> measurement}.
+NAME_TO_TIME = defaultdict(lambda: defaultdict(list))
 
 
 @contextlib.contextmanager
@@ -348,7 +346,8 @@ def _startup_assertions():
     """
     Ensure the benchmark environment is suitable in various ways.
     """
-    if _run("pgrep bitcoin", check_returncode=False)[2] == 0 and \
+    if _run("pgrep bitcoin | grep -v bitcoinperf",
+            check_returncode=False)[2] == 0 and \
             not args.no_caution:
         raise RuntimeError(
             "benchmarks shouldn't run concurrently with unrelated bitcoin "
