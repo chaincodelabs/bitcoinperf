@@ -43,11 +43,8 @@ $ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.yml
 # Compare v0.16.0 to the current tip
 
 $ docker-compose run --rm bench \
-    bitcoinperf --commits "v0.16.0,master"
-    --no-clean=1 \
-    --run-counts ibd:3 \
-    --benches-to-run gitclone,build,ibd \
-    --log-level INFO \
-    --bitcoind-stopatheight 200000
+    bitcoinperf \
+    --commits "v0.16.0,master"
+    --run-counts ibd:3 --benches-to-run gitclone,build,ibd --bitcoind-stopatheight 200000
 
 ```
