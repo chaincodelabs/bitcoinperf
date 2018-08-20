@@ -370,6 +370,8 @@ BENCH_PREFIX = (
 
 
 def get_commits():
+    args.commits = list(filter(None, args.commits))
+
     if not args.commits:
         return ['HEAD']
     return args.commits
@@ -818,7 +820,7 @@ def main():
     try:
         run_benches()
 
-        if len(args.commits) <= 1:
+        if len(get_commits()) <= 1:
             timestr = output.get_times_table(
                 NAME_TO_TIME[RUN_DATA.current_ref])
             print(timestr)
