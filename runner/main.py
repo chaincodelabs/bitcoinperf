@@ -291,6 +291,11 @@ def run_synced_bitcoind():
     sleep_time_secs = 2
     bitcoind_up = False
 
+    def stop_synced_bitcoind():
+        _run("%s/src/bitcoin-cli -datadir=%s stop" %
+             (args.synced_bitcoin_repo_dir, args.synced_data_dir))
+        bitcoinps.wait(timeout=120)
+
     while num_tries > 0 and bitcoinps.returncode is None and not bitcoind_up:
         info = None
         info_call = _run(
@@ -306,6 +311,7 @@ def run_synced_bitcoind():
                 info_call[2])
 
         if info and info["blocks"] < int(args.bitcoind_stopatheight):
+            stop_synced_bitcoind()  # Stop process; we're exiting.
             raise RuntimeError(
                 "synced bitcoind node doesn't have enough blocks "
                 "(%s vs. %s)" %
@@ -325,9 +331,7 @@ def run_synced_bitcoind():
         yield
     finally:
         logger.info("shutting down synced node (pid %s)", bitcoinps.pid)
-        _run("%s/src/bitcoin-cli -datadir=%s stop" %
-             (args.synced_bitcoin_repo_dir, args.synced_data_dir))
-        bitcoinps.wait(timeout=120)
+        stop_synced_bitcoind()
 
         if bitcoinps.returncode != 0:
             logger.warning(
