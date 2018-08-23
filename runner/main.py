@@ -7,6 +7,7 @@ See bin/run_bench for a sample invocation.
 """
 
 import argparse
+import re
 import atexit
 import os
 import subprocess
@@ -710,7 +711,7 @@ def check_for_failure(bench_name, stdout, stderr, total_time_secs):
     Sometimes certain benchmarks may fail with zero returncodes and we must
     examine other things to detect the failure.
     """
-    if bench_name in ('ibd', 'reindex'):
+    if re.match(r'ibd.*|reindex', bench_name):
         disk_warning_ps = subprocess.run(
             "tail -n 10000 %s/bitcoin/data/debug.log | "
             "grep 'Disk space is low!' " % RUN_DATA.workdir)
@@ -721,7 +722,7 @@ def check_for_failure(bench_name, stdout, stderr, total_time_secs):
                 bench_name)
             return True
 
-    if bench_name == 'ibd':
+    if re.match(r'ibd.*', bench_name):
         one_hour_secs = 60 * 60 * 2
 
         if total_time_secs < one_hour_secs:
