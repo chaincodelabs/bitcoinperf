@@ -358,6 +358,10 @@ def _startup_assertions():
                 "benchmarks shouldn't run concurrently with unrelated bitcoin "
                 "processes")
 
+        if _run("$(which time) -f %M sleep 0.01",
+                check_returncode=False)[2] != 0:
+            raise RuntimeError("the time package is required")
+
         _run('sudo swapoff -a')
 
         if _run('cat /proc/swaps | grep -v "^Filename"',
