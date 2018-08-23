@@ -351,17 +351,18 @@ def _startup_assertions():
     """
     Ensure the benchmark environment is suitable in various ways.
     """
-    if _run("pgrep --list-name bitcoin | grep -v bitcoinperf",
-            check_returncode=False)[2] == 0 and \
-            not args.no_caution:
-        raise RuntimeError(
-            "benchmarks shouldn't run concurrently with unrelated bitcoin "
-            "processes")
+    if not args.no_caution:
+        if _run("pgrep --list-name bitcoin | grep -v bitcoinperf",
+                check_returncode=False)[2] == 0:
+            raise RuntimeError(
+                "benchmarks shouldn't run concurrently with unrelated bitcoin "
+                "processes")
 
-    if _run('cat /proc/swaps | grep -v "^Filename"',
-            check_returncode=False)[2] != 1 and not args.no_caution:
-        raise RuntimeError(
-            "swap must be disabled during benchmarking")
+        _run('sudo swapoff -a')
+
+        if _run('cat /proc/swaps | grep -v "^Filename"',
+                check_returncode=False)[2] != 1:
+            raise RuntimeError("swap must be disabled during benchmarking")
 
     if not _try_acquire_lockfile():
         raise RuntimeError(
