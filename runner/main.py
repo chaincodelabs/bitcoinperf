@@ -719,7 +719,7 @@ def check_for_failure(bench_name, stdout, stderr, total_time_secs):
     if re.match(r'ibd.*|reindex', bench_name):
         disk_warning_ps = subprocess.run(
             "tail -n 10000 %s/bitcoin/data/debug.log | "
-            "grep 'Disk space is low!' " % RUN_DATA.workdir)
+            "grep 'Disk space is low!' " % RUN_DATA.workdir, shell=True)
 
         if disk_warning_ps.returncode == 0:
             logger.warning(
