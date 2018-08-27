@@ -630,7 +630,8 @@ def _stash_debug_file():
     # Move the debug.log file out into /tmp for diagnostics.
     debug_file = RUN_DATA.workdir / "/bitcoin/data/debug.log"
     if debug_file.is_file():
-        debug_file.rename(Path("/tmp/{}debug.log".format(BENCH_PREFIX)))
+        # Overwrite the file so as not to fill up disk.
+        debug_file.rename(Path("/tmp/bench-debug.log".format(BENCH_PREFIX)))
 
 
 atexit.register(_clean_shutdown)
