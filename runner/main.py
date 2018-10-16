@@ -18,6 +18,7 @@ import contextlib
 import time
 import requests
 import logging
+import logging.handlers
 import shlex
 import socket
 import sys
@@ -108,7 +109,7 @@ addarg('bitcoind-dbcache', '2048' if MEM_GIB > 3 else '512')
 addarg('bitcoind-stopatheight', '522000')
 addarg('bitcoind-assumevalid',
        '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876',
-       help=('Should be set to a known bock (e.g. the block hash of '
+       help=('Should be set to a known block (e.g. the block hash of '
              'BITCOIND_STOPATHEIGHT) to make sure it is not set to a future '
              'block that we are not aware of'))
 addarg('bitcoind-port', '9003')
@@ -173,17 +174,23 @@ class SlackLogHandler(logging.Handler):
 def _get_logger():
     logger = logging.getLogger(__name__)
     sh = logging.StreamHandler(sys.stdout)
+    log_fmt = '%(asctime)s %(name)s [%(levelname)s] %(message)s'
     sh.setLevel(args.log_level)
-    sh.setFormatter(logging.Formatter(
-        '%(asctime)s %(name)s [%(levelname)s] %(message)s'))
+    sh.setFormatter(logging.Formatter(log_fmt))
+
+    filehandler = logging.handlers.TimedRotatingFileHandler(
+        "bitcoinperf.log", when='D', interval=2)
+    filehandler.setLevel(logging.DEBUG)
+    filehandler.setFormatter(logging.Formatter(log_fmt))
 
     slack = SlackLogHandler()
-    slack.setLevel('WARNING')
+    slack.setLevel(logging.WARNING)
     slack.setFormatter(logging.Formatter('%(message)s'))
 
     logger.addHandler(sh)
+    logger.addHandler(filehandler)
     logger.addHandler(slack)
-    logger.setLevel(args.log_level)
+    logger.setLevel(logging.DEBUG)
     return logger
 
 
@@ -569,7 +576,6 @@ def run_benches():
         RUN_DATA.current_ref = commit
         RUN_DATA.current_commit = subprocess.check_output(
             shlex.split('git rev-parse HEAD')).strip().decode()
-        send_to_slack_attachment("Starting benchmark", {})
 
         for compiler in args.compilers:
             RUN_DATA.compiler = compiler
@@ -835,8 +841,6 @@ def main():
             timestr = output.get_times_table(
                 NAME_TO_TIME[RUN_DATA.current_ref])
             print(timestr)
-            send_to_slack_attachment(
-                "Benchmark complete", {}, text=timestr)
         else:
             output.print_comparative_times_table(NAME_TO_TIME)
     except Exception:
