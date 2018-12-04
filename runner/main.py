@@ -478,7 +478,7 @@ def bench_makecheck():
 def bench_functests():
     _try_execute_and_report(
         'functionaltests.%s' % RUN_DATA.compiler,
-        "./test/functional/test_runner.py --exclude rpc_bind",
+        "./test/functional/test_runner.py",
         num_tries=3, executable='functional-test-runner')
 
 
