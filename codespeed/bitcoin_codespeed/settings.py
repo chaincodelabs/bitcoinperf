@@ -2,6 +2,8 @@
 # Django settings for a Codespeed project.
 import os
 
+import dj_database_url
+
 # Codespeed settings that can be overwritten here.
 from codespeed.settings import *
 
@@ -93,10 +95,7 @@ ADMINS = (
 
 MANAGERS = ADMINS
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASEDIR, 'data.db'),
-    }
+    'default': dj_database_url.config(),  # Reads the DATABASE_URL env var
 }
 
 TIME_ZONE = 'America/New_York'

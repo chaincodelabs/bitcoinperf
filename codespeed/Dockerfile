@@ -1,9 +1,7 @@
 FROM python:3.6.3
 ENV PYTHONUNBUFFERED 1
-RUN mkdir /code && mkdir /repos
-RUN git clone https://github.com/bitcoin/bitcoin.git /repos/bitcoin
+RUN mkdir /code && mkdir /repos && git clone https://github.com/bitcoin/bitcoin.git /repos/bitcoin
 WORKDIR /code
-COPY requirements.txt /code/
-RUN pip install -r requirements.txt
-COPY . /code/
+COPY Pipfile Pipfile.lock /code/
+RUN pip install pipenv==2018.11.26 && pipenv install --system
 ENTRYPOINT ["/code/docker_entrypoint"]

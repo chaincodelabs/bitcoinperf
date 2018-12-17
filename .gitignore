@@ -108,3 +108,5 @@ bin/.env
 runner/.env
 
 data.db
+
+sitestatic/
