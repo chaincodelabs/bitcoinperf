@@ -29,7 +29,7 @@ so we need to clean it up before inserting to postgres.
 ```sh
 bitcoinperf$ sudo su bitcoinperf
 bitcoinperf$ scp james@codespeed:bitcoin-perfmonitor/codespeed/bitcoin_codespeed/data.db data.db
-bitcoinperf$ sqlite data.db
+bitcoinperf$ sqlite3 data.db
 
 DELETE FROM codespeed_branch WHERE ID=5;
 DELETE FROM codespeed_revision WHERE branch_id=5;
@@ -51,11 +51,18 @@ connection.
 
 ```sh
 bitcoinperf$ cd bitcoinperf
-bitcoinperf$ docker-compose build sqlmigrate
 bitcoinperf$ docker-compose run --rm sqlmigrate /bin/bash
 
-sqlmigrate$ export DB_PASSWORD=""
-sqlmigrate$ export DB_HOST=""
+sqlmigrate$ export DB_PASSWORD="..."
+sqlmigrate$ export DB_HOST="35.231.106.7"
 sqlmigrate$ gem install pg sqlite3 sequel
 sqlmigrate$ sequel -C sqlite:///data/data.db postgres://codespeed:$DB_PASSWORD@$DB_HOST/codespeed
+```
+
+### Create views and user for Grafana
+
+```sh
+bitcoinperf$ sudo apt install postgresql-client
+bitcoinperf$ psql -U codespeed -h 35.231.106.7 -d codespeed -a -f \
+  codespeed/migrations/001-result-views.sql
 ```

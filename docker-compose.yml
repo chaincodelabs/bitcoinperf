@@ -25,6 +25,8 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_USER}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD}"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_NAME: "Chaincode"
     volumes:
       - grafana-data:/var/lib/grafana
 

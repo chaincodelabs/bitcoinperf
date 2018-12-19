@@ -1,7 +1,3 @@
-CREATE USER grafanareader WITH PASSWORD 'password';
-GRANT USAGE ON SCHEMA public TO grafanareader;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafanareader;
-
 CREATE OR REPLACE VIEW ibd_result AS
 SELECT 
   res.id as id, 
@@ -82,3 +78,7 @@ INNER JOIN codespeed_environment as env ON res.environment_id = env.id
 INNER JOIN codespeed_revision as rev ON res.revision_id = rev.id
 WHERE
   bench.name like 'reindex.%' AND bench.name like '%.mem-usage';  
+
+CREATE USER grafanareader WITH PASSWORD 'password';
+GRANT USAGE ON SCHEMA public TO grafanareader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafanareader;
