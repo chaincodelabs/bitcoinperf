@@ -1,0 +1,25 @@
+#!/bin/bash
+# vi: ft=sh sw=2
+#
+# Shortcuts for local development.
+
+CMD="$1"; shift;
+ 
+base_cmd() {
+  docker-compose -f docker-compose.yml -f docker-compose.dev.yml "$@"
+}
+ 
+if [[ "$CMD" == "dc" ]]; then
+  base_cmd "$@"
+
+elif [[ "$CMD" == "up" ]]; then
+  GRAFANA_USER=admin GRAFANA_PASSWORD=foobar00 \
+    base_cmd up -d codespeed grafana
+
+elif [[ "$CMD" == "logs" ]]; then
+  base_cmd logs -f "$@"
+                      
+elif [[ "$CMD" == "runc" ]]; then
+  base_cmd run --rm codespeed "$@"
+                      
+fi

@@ -13,7 +13,7 @@ to the new server.
 
 ### Deploy the new code
 
-Provision a new server on GCP running the `ansible` branch of bitcoinperf.
+Provision a new server on GCP running the `psql-grafana` branch of bitcoinperf.
 Ensure docker-compose has started both codespeed and grafana containers. Ensure
 both are accessible at https://codespeed.bitcoinperf.com and
 https://grafana.bitcoinperf.com.
