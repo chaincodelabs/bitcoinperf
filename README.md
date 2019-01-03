@@ -51,3 +51,15 @@ $ ./bin/dev dc run --rm bench \
     --run-counts ibd:3 --benches-to-run gitclone,build,ibd --bitcoind-stopatheight 200000
 
 ```
+
+### Configuring Grafana
+
+Grafana dashboards can be recreated locally by importing the JSON files
+stored in `grafana_management/backups/`.
+
+When dashboards are edited on the live environment, they should be backed up
+using `grafana_management/backup_dashboard_json.sh`.
+
+In order for the saved Grafana dashboard configurations to work, you'll need
+to make sure you've installed the Postgres views contained in
+`codespeed/migrations/001-result-views.sql`.
