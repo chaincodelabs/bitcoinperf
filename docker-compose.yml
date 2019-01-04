@@ -2,46 +2,41 @@ version: '3'
 
 services:
 
-  # At the moment this is configured for local testing. Could probably tweak it
-  # into something production compatible if desired.
-  #
-
-  bench:
-    image: runner
-    build:
-      context: .
-      dockerfile: ./runner/Dockerfile
-    environment:
-      - BITCOIND_STOPATHEIGHT=230000
-      - IBD_PEER_ADDRESS=synced
-      - SYNCED_DATA_DIR=/bitcoin/data
-      - SYNCED_BITCOIN_REPO_DIR=/bitcoin
-      - CODESPEED_URL=http://codespeed:8000
-      - CODESPEED_USER=admin
-      - CODESPEED_PASSWORD=password
-      - CODESPEED_ENVNAME=ccl-bench-hdd-1
-      - NO_CAUTION=1  # Can't drop caches from within a container.
-      - MAKE_JOBS=5
-      - COMPILERS=clang
-      - BENCHES_TO_RUN=gitclone,build,ibd,reindex
-      # Set minimumchainwork low so that we actually latch out of IBD at low
-      # heights.
-      - SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00
-    volumes:
-      - .:/code
-
-  synced:
-    image: runner
-    volumes:
-      - /data/bitcoin_bench:/bitcoin/data
-    command: >
-      /bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole -noconnect -listen=1 -maxtipage=9999999999999999999999999
-
   codespeed:
     build:
       context: ./codespeed
     ports:
       - "8000:8000"
     environment:
-      - TESTING=1
-      - DEBUG=1
+      REPOSITORY_BASE_PATH: "/repos"
+      DATABASE_URL: "${DATABASE_URL}"
+    volumes:
+      - ./codespeed:/code
+
+  sqlmigrate:
+    image: ruby:2.5
+    volumes:
+      - .:/data
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_USER}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD}"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_NAME: "Chaincode"
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+  grafcli:
+    build:
+      context: ./grafana_management
+    volumes:
+      - ./grafana_management:/home/root
+    environment:
+      GRAFANA_API_TOKEN: "${GRAFANA_API_TOKEN}"
+
+volumes:
+  grafana-data:

@@ -1,0 +1,19 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+
+[packages]
+whitenoise = "*"
+isodate = "<0.6,>=0.4.7"
+matplotlib = "<2.0,>=1.4.3"
+psycopg2 = "==2.7.6.1"
+uWSGI = "*"
+Django = "<2.0,>=1.7"
+codespeed = {git = "https://github.com/chaincodelabs/codespeed",ref = "master"}
+dj-database-url = "==0.5.0"
+
+[requires]
+python_version = "3.6"

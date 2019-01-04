@@ -1,0 +1,52 @@
+version: '3'
+
+services:
+ 
+  bench:
+    image: runner
+    build:
+      context: .
+      dockerfile: ./runner/Dockerfile
+    environment:
+      - BITCOIND_STOPATHEIGHT=230000
+      - IBD_PEER_ADDRESS=synced
+      - SYNCED_DATA_DIR=/bitcoin/data
+      - SYNCED_BITCOIN_REPO_DIR=/bitcoin
+      - CODESPEED_URL=http://codespeed:8000
+      - CODESPEED_USER=admin
+      - CODESPEED_PASSWORD=password
+      - CODESPEED_ENVNAME=ccl-bench-hdd-1
+      - NO_CAUTION=1  # Can't drop caches from within a container.
+      - MAKE_JOBS=5
+      - COMPILERS=clang
+      - BENCHES_TO_RUN=gitclone,build,ibd,reindex
+      # Set minimumchainwork low so that we actually latch out of IBD at low
+      # heights.
+      - SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00
+    volumes:
+      - .:/code
+ 
+  synced:
+    image: runner
+    volumes:
+      - /data/bitcoin_bench:/bitcoin/data
+    command: >
+      /bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole -noconnect -listen=1 -maxtipage=9999999999999999999999999
+   
+  codespeed:
+    ports:
+      - "8000:8000"
+    environment:
+      TESTING: 1
+      DEBUG: 1
+      DATABASE_URL: "postgres://codespeed:foobar00@psql:5432/codespeed"
+    links:
+      - psql
+ 
+  psql:
+    image: postgres:10
+    environment:
+      POSTGRES_USER: codespeed
+      POSTGRES_PASSWORD: foobar00
+    volumes:
+      - .:/data

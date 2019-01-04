@@ -1,11 +1,14 @@
 ## Bitcoin Core performance monitor 📈
 
-This repository consists of two components
+[bitcoinperf.com](https://bitcoinperf.com)
+
+This repository consists of a few components
 
 - a [codespeed](https://github.com/chaincodelabs/codespeed) installation which
   collects and presents benchmarking results in a web interface, and
 - a haphazard Python script for running high-level Bitcoin Core benchmarks which
-  POSTs results to codespeed.
+  POSTs results to codespeed, and
+- a Grafana interface for presenting the benchmark results.
 
 The benchmarks which are monitored are
 
@@ -34,17 +37,29 @@ Install docker & docker-compose, then run
 ```sh
 # Bring up codespeed server and a synced bitcoind instance
 
-$ docker-compose up -d codespeed synced
+$ ./bin/dev up codespeed synced
 
 # Modify docker-compose.yml to reference a synced datadir on your host machine.
 
-$ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.yml
+$ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.dev.yml
 
 # Compare v0.16.0 to the current tip
 
-$ docker-compose run --rm bench \
+$ ./bin/dev dc run --rm bench \
     bitcoinperf \
     --commits "v0.16.0,master"
     --run-counts ibd:3 --benches-to-run gitclone,build,ibd --bitcoind-stopatheight 200000
 
 ```
+
+### Configuring Grafana
+
+Grafana dashboards can be recreated locally by importing the JSON files
+stored in `grafana_management/backups/`.
+
+When dashboards are edited on the live environment, they should be backed up
+using `grafana_management/backup_dashboard_json.sh`.
+
+In order for the saved Grafana dashboard configurations to work, you'll need
+to make sure you've installed the Postgres views contained in
+`codespeed/migrations/001-result-views.sql`.
