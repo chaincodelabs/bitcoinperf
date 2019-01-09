@@ -17,6 +17,22 @@ BENCH_NAMES = {
     'microbench', 'ibd', 'reindex'}
 
 
+BENCH_SPECIFIC_BITCOIND_ARGS = (
+    # To "complete" (i.e. latch false out of) initialblockdownload for
+    # stopatheight for a lowish height, we need to set a very large maxtipage.
+    '-maxtipage=99999999999999999999 '
+
+    # If we don't set minimumchainwork to 0, low heights may cause the syncing
+    # peer to never download blocks and thus hang indefinitely during IBD.
+    # See https://github.com/bitcoin/bitcoin/blob/e83d82a85c53196aff5b5ac500f20bb2940663fa/src/net_processing.cpp#L517-L521  # noqa
+    '-minimumchainwork=0x00 '
+
+    # Output buffering into memory during ps.communicate() can cause OOM errors
+    # on machines with small memory, so only output to debug.log files in disk.
+    '-printtoconsole=0 '
+)
+
+
 class RunData:
     """
     Data set at runtime during benchmarking.
@@ -71,35 +87,51 @@ def build_parser():
         return out
 
     addarg('REPO_LOCATION', 'https://github.com/bitcoin/bitcoin.git')
+
     addarg('REPO_BRANCH', 'master', 'The branch to test')
+
     addarg('WORKDIR', '',
            'Path to where the temporary bitcoin clone will be checked out')
+
     addarg('IBD_PEER_ADDRESS', '',
            'Network address to synced peer to IBD from. If left blank, '
            'IBD will be done from the mainnet P2P network.')
+
     addarg('SYNCED_DATA_DIR', '',
            'When using a local IBD peer, specify a path to a datadir synced '
            'to a chain high enough to do the requested IBD '
            '(see --bitcoind-stopatheight)')
+
     addarg('SYNCED_BITCOIN_REPO_DIR', os.environ['HOME'] + '/bitcoin',
            'Where the bitcoind binary which will serve blocks for IBD lives')
+
     addarg('SYNCED_BITCOIND_ARGS', '',
            'Additional arguments to pass to the bitcoind invocation for '
            'the synced IBD peer, e.g. -minimumchainwork')
+
+    addarg('IBD_CHECKPOINTS',
+           '100_000,200_000,300_000,400_000,500_000,522_000',
+           'Chain heights at which duration measurements will be reported '
+           'to codespeed. Can include underscores. E.g. 100_000,200_000')
+
     addarg('CODESPEED_URL', '')
+
     addarg('SLACK_WEBHOOK_URL', '')
+
     addarg(
         'RUN_COUNTS', '',
         help=(
             "Specify the number of times a benchmark should be run, e.g. "
             "'ibd:3,microbench:2'"),
         type=name_to_count_type)
+
     addarg(
         'BENCHES_TO_RUN', default=','.join(BENCH_NAMES),
         help='Only run a subset of benchmarks',
         type=csv_type)
 
     addarg('COMPILERS', 'clang,gcc', type=csv_type)
+
     addarg('MAKE_JOBS', '1', type=int)
 
     addarg(
@@ -109,28 +141,40 @@ def build_parser():
         type=csv_type)
 
     addarg('BITCOIND_DBCACHE', '2048' if MEM_GIB > 3 else '512')
+
     addarg('BITCOIND_STOPATHEIGHT', '522000')
+
     addarg('BITCOIND_ASSUMEVALID',
            '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876',
            help=('Should be set to a known block (e.g. the block hash of '
                  'BITCOIND_STOPATHEIGHT) to make sure it is not set to a '
                  'future block that we are not aware of'))
+
     addarg('BITCOIND_PORT', '9003')
+
     addarg('BITCOIND_RPCPORT', '9004')
+
     addarg('LOG_LEVEL', 'DEBUG')
+
     addarg('NPROC', min(4, int(multiprocessing.cpu_count())), type=int)
+
     addarg('NO_TEARDOWN', False,
            'If true, leave the Bitcoin checkout intact after finishing',
            type=bool)
+
     addarg('NO_CAUTION', False,
            "If true, don't perform a variety of startup checks and cache "
            "drops",
            type=bool)
+
     addarg('NO_CLEAN', False,
            "If true, do not call `make distclean` before builds. Useful for "
            "when you don't care about build times.", type=bool)
+
     addarg('CODESPEED_USER', '')
+
     addarg('CODESPEED_PASSWORD', '')
+
     addarg('CODESPEED_ENVNAME', {
         'bench-odroid-1': 'ccl-bench-odroid-1',
         'bench-raspi-1': 'ccl-bench-raspi-1',

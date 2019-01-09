@@ -10,7 +10,6 @@ import atexit
 import os
 import subprocess
 import tempfile
-import json
 import datetime
 import contextlib
 import time
@@ -20,7 +19,7 @@ import traceback
 from collections import defaultdict
 from pathlib import Path
 
-from . import output, config, endpoints, bitcoinrpc
+from . import output, config, endpoints, bitcoind
 from .sh import run, popen
 
 
@@ -43,99 +42,6 @@ def timer(name: str):
 # Maintain a lockfile that is global across the host to ensure that we're not
 # running more than one instance on a given system.
 LOCKFILE_PATH = Path("/tmp/bitcoin_bench.lock")
-
-
-BENCH_SPECIFIC_BITCOIND_ARGS = (
-    # To "complete" (i.e. latch false out of) initialblockdownload for
-    # stopatheight for a lowish height, we need to set a very large maxtipage.
-    '-maxtipage=99999999999999999999 '
-
-    # If we don't set minimumchainwork to 0, low heights may cause the syncing
-    # peer to never download blocks and thus hang indefinitely during IBD.
-    # See https://github.com/bitcoin/bitcoin/blob/e83d82a85c53196aff5b5ac500f20bb2940663fa/src/net_processing.cpp#L517-L521  # noqa
-    '-minimumchainwork=0x00 '
-
-    # Output buffering into memory during ps.communicate() can cause OOM errors
-    # on machines with small memory, so only output to debug.log files in disk.
-    '-printtoconsole=0 '
-)
-
-
-@contextlib.contextmanager
-def run_synced_bitcoind():
-    """
-    Context manager which spawns (and cleans up) a bitcoind instance that has a
-    synced chain high enough to service an IBD up to BITCOIND_STOPATHEIGHT.
-    """
-    if not cfg.running_synced_bitcoind_locally:
-        # If we're not running a node locally, don't worry about setup and
-        # teardown.
-        yield
-        return
-
-    bitcoinps = popen(
-        # Relies on bitcoind being precompiled and synced chain data existing
-        # in /bitcoin_data; see runner/Dockerfile.
-        "%s/src/bitcoind -datadir=%s -noconnect -listen=1 %s %s" % (
-            cfg.synced_bitcoin_repo_dir, cfg.synced_data_dir,
-            BENCH_SPECIFIC_BITCOIND_ARGS, cfg.synced_bitcoind_args,
-            ))
-
-    logger.info(
-        "started synced node with '%s' (pid %s)",
-        bitcoinps.args, bitcoinps.pid)
-
-    # Wait for bitcoind to come up.
-    num_tries = 100
-    sleep_time_secs = 2
-    bitcoind_up = False
-
-    def stop_synced_bitcoind():
-        run("{}/src/bitcoin-cli -datadir={} stop".format(
-            cfg.synced_bitcoin_repo_dir, cfg.synced_data_dir))
-        bitcoinps.wait(timeout=120)
-
-    while num_tries > 0 and bitcoinps.returncode is None and not bitcoind_up:
-        info = bitcoinrpc.call_rpc("getblockchaininfo", on_synced=True)
-        info_call = run(
-            "{}/src/bitcoin-cli -datadir={} getblockchaininfo".format(
-                cfg.synced_bitcoin_repo_dir, cfg.synced_data_dir),
-            check_returncode=False)
-
-        if info_call[2] == 0:
-            info = json.loads(info_call[0].decode())
-        else:
-            logger.debug(
-                "non-zero returncode (%s) from synced bitcoind status check",
-                info_call[2])
-
-        if info and info["blocks"] < int(cfg.bitcoind_stopatheight):
-            stop_synced_bitcoind()  # Stop process; we're exiting.
-            raise RuntimeError(
-                "synced bitcoind node doesn't have enough blocks "
-                "(%s vs. %s)" %
-                (info['blocks'], int(cfg.bitcoind_stopatheight)))
-        elif info:
-            bitcoind_up = True
-        else:
-            num_tries -= 1
-            time.sleep(sleep_time_secs)
-
-    if not bitcoind_up:
-        raise RuntimeError("Couldn't bring synced node up")
-
-    logger.info("synced node is active (pid %s) %s", bitcoinps.pid, info)
-
-    try:
-        yield
-    finally:
-        logger.info("shutting down synced node (pid %s)", bitcoinps.pid)
-        stop_synced_bitcoind()
-
-        if bitcoinps.returncode != 0:
-            logger.warning(
-                "synced bitcoind returned with nonzero return code "
-                "%s" % bitcoinps.returncode)
 
 
 def _drop_caches():
@@ -307,8 +213,11 @@ def bench_microbench():
 
 
 @benchmark('ibd')
-def bench_ibd_and_reindex(run_bitcoind_cmd):
-    ibd_bench_name = 'ibd.real' if cfg.ibd_from_network else 'ibd.local'
+def bench_ibd():
+    bench_prefix = 'ibd.real' if cfg.ibd_from_network else 'ibd.local'
+    bench_name_fmt = bench_prefix + '.{}.dbcache=' + cfg.bitcoind_dbcache
+    checkpoints = list(sorted(
+        int(i) for i in cfg.ibd_checkpoints.replace("_", "").split(",")))
 
     # Ensure empty data before each IBD.
     datadir = cfg.run_data.workdir / 'bitcoin' / 'data'
@@ -316,19 +225,59 @@ def bench_ibd_and_reindex(run_bitcoind_cmd):
     if not datadir.exists():
         datadir.mkdir()
 
-    with run_synced_bitcoind():
-        _try_execute_and_report(
-            '%s.%s.dbcache=%s' % (
-                ibd_bench_name,
-                cfg.bitcoind_stopatheight, cfg.bitcoind_dbcache),
-            run_bitcoind_cmd,
-        )
+    with bitcoind.run_synced_bitcoind():
+        cmd = IBDCommand.from_cfg(bench_name_fmt.format('tip'), reindex=True)
+        cmd.start()
+        failure_count = 0
+        next_checkpoint = checkpoints.pop(0) if checkpoints else None
 
-    if 'reindex' in cfg.benches_to_run:
-        _try_execute_and_report(
-            'reindex.%s.dbcache=%s' % (
-                cfg.bitcoind_stopatheight, cfg.bitcoind_dbcache),
-            '%s -reindex' % run_bitcoind_cmd)
+        while True:
+            info = bitcoind.call_rpc(cfg, "getblockchaininfo")
+
+            if not info:
+                failure_count += 1
+                continue
+
+            if failure_count > 20:
+                logger.error(
+                    "Bitcoind hasn't responded to RPC in a suspiciously long "
+                    "time... hung?")
+                break
+
+            if next_checkpoint and info["blocks"] >= next_checkpoint:
+                # Report to codespeed for this blockheight checkpoint
+                cmd.report_to_codespeed(
+                    cfg, 'bitcoind',
+                    name=bench_name_fmt.format(next_checkpoint))
+                next_checkpoint = checkpoints.pop(0) if checkpoints else None
+
+                # continue without sleep - we may have to drain the checkpoints
+                # queue.
+                continue
+
+            elif not info["initialblockdownload"]:
+                # IBD complete!
+                break
+
+            time.sleep(10)
+
+        cmd.join()
+
+        if not cmd.check_for_failure():
+            cmd.report_to_codespeed(cfg, 'bitcoind')
+
+
+@benchmark('reindex')
+def bench_reindex():
+    bench_name = 'reindex.%s.dbcache=%s' % (
+        cfg.bitcoind_stopatheight, cfg.bitcoind_dbcache),
+
+    cmd = IBDCommand.from_cfg(bench_name, reindex=True)
+    cmd.start()
+    cmd.join()
+
+    if not cmd.check_for_failure():
+        cmd.send_final_bench_scores()
 
 
 def run_benches():
@@ -350,9 +299,7 @@ def run_benches():
     cfg.run_data.gitref = cfg.repo_branch
 
     os.chdir(str(workdir))
-
     bench_gitclone()
-
     os.chdir(str(workdir / 'bitcoin'))
 
     for commit in get_commits():
@@ -371,26 +318,8 @@ def run_benches():
             bench_functests()
             bench_microbench()
 
-        connect_config = '-listen=0' if cfg.ibd_from_network else '-connect=0'
-        addnode_config = (
-            # If we aren't IBDing from random peers on the network, specify the
-            # peer.
-            ('-addnode=%s' % cfg.ibd_peer_address)
-            if not cfg.ibd_from_network else '')
-
-        run_bitcoind_cmd = (
-            './src/bitcoind -datadir={}/bitcoin/data '
-            '-dbcache={} -txindex=1 '
-            '{} -debug=all -stopatheight={} -assumevalid={} '
-            '-port={} -rpcport={} {} {}'.format(
-                workdir, cfg.bitcoind_dbcache, connect_config,
-                cfg.bitcoind_stopatheight, cfg.bitcoind_assumevalid,
-                cfg.bitcoind_port, cfg.bitcoind_rpcport,
-                addnode_config,
-                BENCH_SPECIFIC_BITCOIND_ARGS,
-            ))
-
-        bench_ibd_and_reindex(run_bitcoind_cmd)
+        bench_ibd()
+        bench_reindex()
 
 
 def _try_acquire_lockfile():
@@ -431,6 +360,10 @@ def _stash_debug_file():
 
 
 class Command:
+    """
+    Manages the running of a subprocess for a certain benchmark.
+    """
+
     def __init__(self, cmd: str, bench_name: str):
         self.cmd: str = cmd
         self.bench_name = bench_name
@@ -450,9 +383,7 @@ class Command:
 
     @property
     def total_secs(self) -> float:
-        if self.returncode is None:
-            raise RuntimeError("can't get total time before completion")
-        return self.end_time - self.start_time
+        return (self.end_time or time.time()) - self.start_time
 
     @property
     def returncode(self):
@@ -461,11 +392,13 @@ class Command:
     @property
     def memusage_kib(self) -> int:
         if self.returncode is None:
-            raise RuntimeError("can't get memusage before completion")
+            None
         return int(self.stderr.strip().split('\n')[-1])
 
     def check_for_failure(self):
         """
+        Parse output and returncode to determine if there was a failure.
+
         Sometimes certain benchmarks may fail with zero returncodes and we must
         check other things to detect the failure.
         """
@@ -512,6 +445,75 @@ class Command:
 
         return failed
 
+    def report_to_codespeed(self, cfg, executable: str, name: str = None):
+        name = name or self.bench_name
+
+        NAME_TO_TIME[cfg.run_data.gitref][name].append(self.total_secs)
+        endpoints.send_to_codespeed(cfg, name, self.total_secs, executable)
+
+        if self.memusage_kib is not None:
+            mem_name = name + '.mem-usage'
+            NAME_TO_TIME[cfg.run_data.gitref][mem_name].append(
+                self.memusage_kib)
+            endpoints.send_to_codespeed(
+                cfg, mem_name, self.memusage_kib, executable,
+                units_title='Size', units='KiB')
+
+
+class IBDCommand(Command):
+
+    def __init__(self,
+                 bench_name,
+                 dbcache=None,
+                 txindex=1,
+                 assumevalid=None,
+                 stopatheight=None,
+                 reindex=False,
+                 ):
+        self.dbcache = dbcache
+        self.txindex = txindex
+        self.assumevalid = assumevalid
+        self.stopatheight = stopatheight
+
+        connect_config = '-listen=0' if cfg.ibd_from_network else '-connect=0'
+        addnode_config = (
+            # If we aren't IBDing from random peers on the network, specify the
+            # peer.
+            ('-addnode=%s' % cfg.ibd_peer_address)
+            if not cfg.ibd_from_network else '')
+
+        run_bitcoind_cmd = (
+            './src/bitcoind -datadir={}/bitcoin/data '
+            '-dbcache={} -txindex=1 '
+            '{} -debug=all -assumevalid={} '
+            '-port={} -rpcport={} {} {}'.format(
+                cfg.run_data.workdir,
+                dbcache,
+                connect_config,
+                assumevalid,
+                cfg.bitcoind_port,
+                cfg.bitcoind_rpcport,
+                addnode_config,
+                config.BENCH_SPECIFIC_BITCOIND_ARGS,
+            ))
+
+        if stopatheight:
+            run_bitcoind_cmd += " -stopatheight={}".format(stopatheight)
+
+        if reindex:
+            run_bitcoind_cmd += " -reindex"
+
+        super(IBDCommand, self).__init__(bench_name, run_bitcoind_cmd)
+
+    @classmethod
+    def from_cfg(cls, bench_name, **kwargs):
+        return cls(
+            cfg.run_data.workdir,
+            dbcache=cfg.bitcoind_dbcache,
+            assumevalid=cfg.bitcoind_assumevalid,
+            **kwargs,
+        )
+
 
 def _try_execute_and_report(
         bench_name, cmd, *, num_tries=1, executable='bitcoind'):
@@ -531,15 +533,7 @@ def _try_execute_and_report(
         if i == (num_tries - 1):
             return False
 
-    mem_name = bench_name + '.mem-usage'
-    NAME_TO_TIME[cfg.run_data.gitref][mem_name].append(cmd.memusage_kib)
-    endpoints.send_to_codespeed(
-        cfg, mem_name, cmd.memusage_kib, executable,
-        units_title='Size', units='KiB')
-
-    NAME_TO_TIME[cfg.run_data.gitref][bench_name].append(cmd.total_secs)
-    endpoints.send_to_codespeed(
-        cfg, bench_name, cmd.total_secs, executable)
+    cmd.send_final_bench_scores(cfg, executable)
 
 
 def main():

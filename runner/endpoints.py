@@ -8,7 +8,7 @@ def send_to_codespeed(
         cfg,
         bench_name, result, executable,
         lessisbetter=True, units_title='Time', units='seconds', description='',
-        result_max=None, result_min=None):
+        result_max=None, result_min=None, extra_data=None):
     """
     Send a benchmark result to codespeed over HTTP.
     """
@@ -33,6 +33,7 @@ def send_to_codespeed(
         'units_title': units_title,
         'units': units,
         'description': description,
+        'extra_data': extra_data or {},
     }
 
     cfg.logger.debug(
