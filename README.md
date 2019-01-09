@@ -52,6 +52,13 @@ $ ./bin/dev runbench \
 
 ```
 
+### Running unittests
+
+```sh
+$ ./bin/dev up codespeed
+$ ./bin/dev test
+```
+
 ### Configuring Grafana
 
 Grafana dashboards can be recreated locally by importing the JSON files
