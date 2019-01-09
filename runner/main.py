@@ -20,7 +20,8 @@ import traceback
 from collections import defaultdict
 from pathlib import Path
 
-from . import output, logging, config, endpoints
+from . import output, config, endpoints, bitcoinrpc
+from .sh import run, popen
 
 
 # Global config object; set below in main() after we've parsed commandline
@@ -72,7 +73,7 @@ def run_synced_bitcoind():
         yield
         return
 
-    bitcoinps = _popen(
+    bitcoinps = popen(
         # Relies on bitcoind being precompiled and synced chain data existing
         # in /bitcoin_data; see runner/Dockerfile.
         "%s/src/bitcoind -datadir=%s -noconnect -listen=1 %s %s" % (
@@ -90,13 +91,13 @@ def run_synced_bitcoind():
     bitcoind_up = False
 
     def stop_synced_bitcoind():
-        _run("%s/src/bitcoin-cli -datadir=%s stop" %
-             (cfg.synced_bitcoin_repo_dir, cfg.synced_data_dir))
+        run("{}/src/bitcoin-cli -datadir={} stop".format(
+            cfg.synced_bitcoin_repo_dir, cfg.synced_data_dir))
         bitcoinps.wait(timeout=120)
 
     while num_tries > 0 and bitcoinps.returncode is None and not bitcoind_up:
-        info = None
-        info_call = _run(
+        info = bitcoinrpc.call_rpc("getblockchaininfo", on_synced=True)
+        info_call = run(
             "{}/src/bitcoin-cli -datadir={} getblockchaininfo".format(
                 cfg.synced_bitcoin_repo_dir, cfg.synced_data_dir),
             check_returncode=False)
@@ -141,7 +142,7 @@ def _drop_caches():
     # N.B.: the host sudoer file needs to be configured to allow non-superusers
     # to run this command. See: https://unix.stackexchange.com/a/168670
     if not cfg.no_caution:
-        _run("sudo /sbin/sysctl vm.drop_caches=3")
+        run("sudo /sbin/sysctl vm.drop_caches=3")
 
 
 def _startup_assertions():
@@ -149,19 +150,19 @@ def _startup_assertions():
     Ensure the benchmark environment is suitable in various ways.
     """
     if not cfg.no_caution:
-        if _run("pgrep --list-name bitcoin | grep -v bitcoinperf",
+        if run("pgrep --list-name bitcoin | grep -v bitcoinperf",
                 check_returncode=False)[2] == 0:
             raise RuntimeError(
                 "benchmarks shouldn't run concurrently with unrelated bitcoin "
                 "processes")
 
-        if _run("$(which time) -f %M sleep 0.01",
+        if run("$(which time) -f %M sleep 0.01",
                 check_returncode=False)[2] != 0:
             raise RuntimeError("the time package is required")
 
-        _run('sudo swapoff -a')
+        run('sudo swapoff -a')
 
-        if _run('cat /proc/swaps | grep -v "^Filename"',
+        if run('cat /proc/swaps | grep -v "^Filename"',
                 check_returncode=False)[2] != 1:
             raise RuntimeError("swap must be disabled during benchmarking")
 
@@ -206,17 +207,17 @@ def benchmark(name):
 @benchmark('gitclone')
 def bench_gitclone():
     with timer("gitclone"):
-        _run("git clone -b %s %s" % (cfg.repo_branch, cfg.repo_location))
+        run("git clone -b %s %s" % (cfg.repo_branch, cfg.repo_location))
 
 
 @benchmark('build')
 def bench_build():
-    _run("./contrib/install_db4.sh .")
+    run("./contrib/install_db4.sh .")
 
     my_env = os.environ.copy()
     my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % cfg.run_data.workdir
 
-    _run("./autogen.sh")
+    run("./autogen.sh")
 
     configure_prefix = ''
     if cfg.run_data.compiler == 'clang':
@@ -225,7 +226,7 @@ def bench_build():
     # Ensure build is clean.
     makefile_path = cfg.run_data.workdir / 'bitcoin' / 'Makefile'
     if makefile_path.is_file() and not cfg.no_clean:
-        _run('make distclean')
+        run('make distclean')
 
     boostflags = ''
     armlib_path = '/usr/lib/arm-linux-gnueabihf/'
@@ -235,7 +236,7 @@ def bench_build():
         # otherwise configuring with clang can fail.
         boostflags = '--with-boost-libdir=%s' % armlib_path
 
-    _run(
+    run(
         configure_prefix +
         './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
         'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
@@ -270,7 +271,7 @@ def bench_functests():
 def bench_microbench():
     with timer("microbench.%s" % cfg.run_data.compiler):
         _drop_caches()
-        microbench_ps = _popen("./src/bench/bench_bitcoin")
+        microbench_ps = popen("./src/bench/bench_bitcoin")
         (microbench_stdout,
          microbench_stderr) = microbench_ps.communicate()
 
@@ -311,7 +312,7 @@ def bench_ibd_and_reindex(run_bitcoind_cmd):
 
     # Ensure empty data before each IBD.
     datadir = cfg.run_data.workdir / 'bitcoin' / 'data'
-    _run("rm -rf %s" % datadir, check_returncode=False)
+    run("rm -rf %s" % datadir, check_returncode=False)
     if not datadir.exists():
         datadir.mkdir()
 
@@ -357,7 +358,7 @@ def run_benches():
     for commit in get_commits():
         if commit != 'HEAD':
             logger.info("Checking out commit %s", commit)
-            _run("git checkout %s" % commit)
+            run("git checkout %s" % commit)
 
         cfg.run_data.gitref = commit
         cfg.run_data.gitsha = subprocess.check_output(
@@ -415,7 +416,7 @@ def _clean_shutdown():
 
         os.chdir(str(cfg.run_data.workdir / ".."))
         _stash_debug_file()
-        _run("rm -rf %s" % cfg.run_data.workdir)
+        run("rm -rf %s" % cfg.run_data.workdir)
         logger.debug("shutdown: removed workdir at %s", cfg.run_data.workdir)
     elif cfg.no_teardown:
         logger.debug("shutdown: leaving workdir at %s", cfg.run_data.workdir)
@@ -429,108 +430,116 @@ def _stash_debug_file():
         debug_file.rename(Path("/tmp/bench-debug.log"))
 
 
-def _run(*args, check_returncode=True, **kwargs) -> (bytes, bytes, int):
-    p = subprocess.Popen(
-        *args, **kwargs,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+class Command:
+    def __init__(self, cmd: str, bench_name: str):
+        self.cmd: str = cmd
+        self.bench_name = bench_name
+        self.ps = None
+        self.start_time = None
+        self.stdout = None
+        self.stderr = None
 
-    (stdout, stderr) = p.communicate()
+    def start(self):
+        self.start_time = time.time()
+        self.ps = popen('$(which time) -f %M ' + self.cmd)
+        logger.info("[%s] command '%s' starting", self.bench_name, self.cmd)
 
-    if check_returncode and p.returncode != 0:
-        raise RuntimeError(
-            "Command '%s' failed with code %s\nstderr:\n%s\nstdout:\n%s" % (
-                args[0], p.returncode, stderr, stdout))
-    return (stdout, stderr, p.returncode)
+    def join(self):
+        (self.stdout, self.stderr) = self.ps.communicate()
+        self.end_time = time.time()
 
+    @property
+    def total_secs(self) -> float:
+        if self.returncode is None:
+            raise RuntimeError("can't get total time before completion")
+        return self.end_time - self.start_time
 
-def _popen(args, env=None):
-    return subprocess.Popen(
-        args, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    @property
+    def returncode(self):
+        return self.ps.returncode
+
+    @property
+    def memusage_kib(self) -> int:
+        if self.returncode is None:
+            raise RuntimeError("can't get memusage before completion")
+        return int(self.stderr.strip().split('\n')[-1])
+
+    def check_for_failure(self):
+        """
+        Sometimes certain benchmarks may fail with zero returncodes and we must
+        check other things to detect the failure.
+        """
+        failed = False
+
+        if self.returncode is None:
+            raise RuntimeError("can't check for failure before completion")
+
+        if re.match(r'ibd.*|reindex', self.bench_name):
+            disk_warning_ps = subprocess.run(
+                ("tail -n 10000 {}/bitcoin/data/debug.log | "
+                 "grep 'Disk space is low!' ").format(cfg.run_data.workdir),
+                shell=True)
+
+            if disk_warning_ps.returncode == 0:
+                logger.warning(
+                    "Ran out of disk space while running benchmark %s" %
+                    self.bench_name)
+                failed = True
+
+        if re.match(r'ibd.*', self.bench_name):
+            one_hour_secs = 60 * 60 * 2
+
+            if self.total_secs < one_hour_secs:
+                logger.warning("IBD finished implausibly quickly")
+                failed = True
+
+        if self.returncode != 0:
+            failed = True
+
+        if failed:
+            logger.error(
+                "[%s] command failed\nstdout:\n%s\nstderr:\n%s",
+                self.bench_name,
+                self.stdout.decode()[-10000:],
+                self.stderr.decode()[-10000:])
+        else:
+            logger.info(
+                "[%s] command finished successfully in %.3f seconds (%s) "
+                "with maximum resident set size %.3f MiB",
+                self.bench_name, self.total_secs,
+                datetime.timedelta(seconds=self.total_secs),
+                self.memusage_kib / 1024)
+
+        return failed
 
 
 def _try_execute_and_report(
-        bench_name, cmd, *, report_memory=True, report_time=True, num_tries=1,
-        check_returncode=True, executable='bitcoind'):
+        bench_name, cmd, *, num_tries=1, executable='bitcoind'):
     """
     Attempt to execute some command a number of times and then report
     its execution memory usage or execution time to codespeed over HTTP.
     """
     for i in range(num_tries):
-        start = time.time()
-        ps = _popen('$(which time) -f %M ' + cmd)
+        cmd = Command(cmd, bench_name)
+        cmd.start()
+        cmd.join()
 
-        logger.info("[%s] command '%s' starting", bench_name, cmd)
-
-        (stdout, stderr) = ps.communicate()
-        total_time = time.time() - start
-        # Get the last 10,000 characters of output.
-        stdout = stdout.decode()[-10000:]
-        stderr = stderr.decode()[-10000:]
-
-        if (check_returncode and ps.returncode != 0) \
-                or check_for_failure(
-                    bench_name, stdout, stderr, total_time_secs=total_time):
-            logger.error(
-                "[%s] command failed\nstdout:\n%s\nstderr:\n%s",
-                bench_name, stdout, stderr)
-
-            if i == (num_tries - 1):
-                return False
-            continue
-        else:
+        if not cmd.check_for_failure():
             # Command succeeded
             break
 
-    memusage = int(stderr.strip().split('\n')[-1])
-
-    logger.info(
-        "[%s] command finished successfully "
-        "with maximum resident set size %.3f MiB",
-        bench_name, memusage / 1024)
+        if i == (num_tries - 1):
+            return False
 
     mem_name = bench_name + '.mem-usage'
-    NAME_TO_TIME[cfg.run_data.gitref][mem_name].append(memusage)
-    if report_memory:
-        endpoints.send_to_codespeed(
-            cfg,
-            mem_name, memusage, executable, units_title='Size', units='KiB')
+    NAME_TO_TIME[cfg.run_data.gitref][mem_name].append(cmd.memusage_kib)
+    endpoints.send_to_codespeed(
+        cfg, mem_name, cmd.memusage_kib, executable,
+        units_title='Size', units='KiB')
 
-    logger.info(
-        "[%s] command finished successfully in %.3f seconds (%s)",
-        bench_name, total_time, datetime.timedelta(seconds=total_time))
-
-    NAME_TO_TIME[cfg.run_data.gitref][bench_name].append(total_time)
-    if report_time:
-        endpoints.send_to_codespeed(
-            cfg,
-            bench_name, total_time, executable)
-
-
-def check_for_failure(bench_name, stdout, stderr, total_time_secs):
-    """
-    Sometimes certain benchmarks may fail with zero returncodes and we must
-    examine other things to detect the failure.
-    """
-    if re.match(r'ibd.*|reindex', bench_name):
-        disk_warning_ps = subprocess.run(
-            "tail -n 10000 %s/bitcoin/data/debug.log | "
-            "grep 'Disk space is low!' " % cfg.run_data.workdir, shell=True)
-
-        if disk_warning_ps.returncode == 0:
-            logger.warning(
-                "Ran out of disk space while running benchmark %s" %
-                bench_name)
-            return True
-
-    if re.match(r'ibd.*', bench_name):
-        one_hour_secs = 60 * 60 * 2
-
-        if total_time_secs < one_hour_secs:
-            logger.warning("IBD finished implausibly quickly")
-            return True
-
-    return False
+    NAME_TO_TIME[cfg.run_data.gitref][bench_name].append(cmd.total_secs)
+    endpoints.send_to_codespeed(
+        cfg, bench_name, cmd.total_secs, executable)
 
 
 def main():
