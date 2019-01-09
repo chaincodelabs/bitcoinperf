@@ -20,12 +20,10 @@ def test_print_comparative_times_table():
             |--------|-----------:|----:|----:|
             | bench1 |          3 |   1 |   3 |
 
-
             # a vs. b (relative)
             |  name  | iterations |  a  |  b  |
             |--------|-----------:|----:|----:|
             | bench1 |          3 |   1 |   3 |
-
             """
         )
 

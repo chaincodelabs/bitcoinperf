@@ -14,4 +14,4 @@ RUN ./contrib/install_db4.sh . && \
 WORKDIR /code
 COPY setup.py /code/
 COPY runner /code/runner
-RUN pip3 install --upgrade -e . && pip3 install pytest
+RUN pip3 install -e . && pip3 install pytest

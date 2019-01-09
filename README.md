@@ -37,17 +37,17 @@ Install docker & docker-compose, then run
 ```sh
 # Bring up codespeed server and a synced bitcoind instance
 
-$ ./bin/dev up codespeed synced
+$ ./bin/dev up codespeed
 
 # Modify docker-compose.yml to reference a synced datadir on your host machine.
 
 $ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.dev.yml
 
-# Compare v0.16.0 to the current tip
+# Compare v0.17.0 to the current tip
 
-$ ./bin/dev dc run --rm bench \
+$ ./bin/dev runbench \
     bitcoinperf \
-    --commits "v0.16.0,master"
+    --commits "v0.16.0,master" \
     --run-counts ibd:3 --benches-to-run gitclone,build,ibd --bitcoind-stopatheight 200000
 
 ```

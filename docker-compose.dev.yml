@@ -3,13 +3,12 @@ version: '3'
 services:
  
   bench:
-    image: runner
     build:
       context: .
       dockerfile: ./runner/Dockerfile
     environment:
       - BITCOIND_STOPATHEIGHT=230000
-      - IBD_PEER_ADDRESS=synced
+      - IBD_PEER_ADDRESS=localhost
       - SYNCED_DATA_DIR=/bitcoin/data
       - SYNCED_BITCOIN_REPO_DIR=/bitcoin
       - CODESPEED_URL=http://codespeed:8000
@@ -25,14 +24,11 @@ services:
       - SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00
     volumes:
       - .:/code
- 
-  synced:
-    image: runner
-    volumes:
+
+      # You may need to change the source of this mount to a directory on your 
+      # host machine that contains a synced datadir.
       - /data/bitcoin_bench:/bitcoin/data
-    command: >
-      /bitcoin/src/bitcoind -datadir=/bitcoin/data -printtoconsole -noconnect -listen=1 -maxtipage=9999999999999999999999999
-   
+ 
   codespeed:
     ports:
       - "8000:8000"
