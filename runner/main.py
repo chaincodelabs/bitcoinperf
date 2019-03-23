@@ -15,18 +15,21 @@ import contextlib
 import time
 import shlex
 import getpass
+import logging
+import logging.handlers
 import traceback
 from collections import defaultdict
 from pathlib import Path
 
-from . import output, config, endpoints, bitcoind
+from . import output, config, endpoints, bitcoind, sh
+from .logging import get_logger
 from .sh import run, popen
 
+logger = get_logger()
 
 # Global config object; set below in main() after we've parsed commandline
 # arguments.
 cfg = None
-logger = None
 
 # TODO Actually, commit name -> {bench name -> measurement}.
 NAME_TO_TIME = defaultdict(lambda: defaultdict(list))
@@ -111,13 +114,15 @@ def benchmark(name):
 
 
 @benchmark('gitclone')
-def bench_gitclone():
+def bench_gitclone(to_path: Path):
     with timer("gitclone"):
-        run("git clone -b %s %s" % (cfg.repo_branch, cfg.repo_location))
+        run("git clone -b {} {} {}".format(
+            cfg.repo_branch, cfg.repo_location, to_path))
 
 
 @benchmark('build')
 def bench_build():
+    logger.info("Building db4")
     run("./contrib/install_db4.sh .")
 
     my_env = os.environ.copy()
@@ -142,6 +147,7 @@ def bench_build():
         # otherwise configuring with clang can fail.
         boostflags = '--with-boost-libdir=%s' % armlib_path
 
+    logger.info("Running ./configure [...]")
     run(
         configure_prefix +
         './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
@@ -219,16 +225,25 @@ def bench_ibd():
     checkpoints = list(sorted(
         int(i) for i in cfg.ibd_checkpoints.replace("_", "").split(",")))
 
-    # Ensure empty data before each IBD.
-    datadir = cfg.run_data.workdir / 'bitcoin' / 'data'
-    run("rm -rf %s" % datadir, check_returncode=False)
-    if not datadir.exists():
-        datadir.mkdir()
+    bitcoind.empty_datadir(cfg.run_data.workdir / 'bitcoin')
 
-    with bitcoind.run_synced_bitcoind():
-        cmd = IBDCommand.from_cfg(bench_name_fmt.format('tip'), reindex=True)
+    def report_checkpoint_to_codespeed(command, height):
+        # Report to codespeed for this blockheight checkpoint
+        cmd.report_to_codespeed(
+            cfg, 'bitcoind',
+            name=bench_name_fmt.format(height),
+            extra_data={
+                'height': height,
+                'dbcache': cfg.bitcoind_dbcache,
+            },
+        )
+
+    with bitcoind.run_synced_bitcoind(cfg):
+        cmd = IBDCommand.from_cfg(bench_name_fmt.format('tip'))
         cmd.start()
+
         failure_count = 0
+        last_height_seen = 1
         next_checkpoint = checkpoints.pop(0) if checkpoints else None
 
         while True:
@@ -236,35 +251,45 @@ def bench_ibd():
 
             if not info:
                 failure_count += 1
+                if failure_count > 20:
+                    logger.error(
+                        "Bitcoind hasn't responded to RPC in a suspiciously "
+                        "long time... hung?")
+                    break
+                time.sleep(2)
                 continue
 
-            if failure_count > 20:
-                logger.error(
-                    "Bitcoind hasn't responded to RPC in a suspiciously long "
-                    "time... hung?")
-                break
+            last_height_seen = info['blocks']
+            logger.debug("Saw height %s", last_height_seen)
 
-            if next_checkpoint and info["blocks"] >= next_checkpoint:
+            if next_checkpoint and \
+                    next_checkpoint != 'tip' and \
+                    last_height_seen >= next_checkpoint:
                 # Report to codespeed for this blockheight checkpoint
-                cmd.report_to_codespeed(
-                    cfg, 'bitcoind',
-                    name=bench_name_fmt.format(next_checkpoint))
+                report_checkpoint_to_codespeed(cmd, next_checkpoint)
                 next_checkpoint = checkpoints.pop(0) if checkpoints else None
 
-                # continue without sleep - we may have to drain the checkpoints
-                # queue.
-                continue
+                if not next_checkpoint:
+                    logger.debug("Out of checkpoints - shutting down the ibd")
+                    break
 
-            elif not info["initialblockdownload"]:
-                # IBD complete!
+            if cmd.returncode is not None or \
+                    info["verificationprogress"] > 0.9999:
+                logger.debug("IBD complete or failed: %s", info)
                 break
 
-            time.sleep(10)
+            time.sleep(5)
 
         cmd.join()
 
         if not cmd.check_for_failure():
-            cmd.report_to_codespeed(cfg, 'bitcoind')
+            for height in checkpoints:
+                report_checkpoint_to_codespeed(cmd, height)
+
+            cmd.report_to_codespeed(cfg, 'bitcoind', extra_data={
+                'height': last_height_seen,
+                'dbcache': cfg.bitcoind_dbcache,
+            })
 
 
 @benchmark('reindex')
@@ -277,7 +302,7 @@ def bench_reindex():
     cmd.join()
 
     if not cmd.check_for_failure():
-        cmd.send_final_bench_scores()
+        cmd.report_to_codespeed(cfg, 'bitcoind')
 
 
 def run_benches():
@@ -291,16 +316,12 @@ def run_benches():
 
     _startup_assertions()
 
-    if cfg.workdir:
-        workdir = Path(cfg.workdir)
-    else:
-        workdir = Path(tempfile.mkdtemp(prefix=cfg.bench_prefix))
-    cfg.run_data.workdir = workdir
+    cfg.run_data.workdir = Path(
+        cfg.workdir or tempfile.mkdtemp(prefix=cfg.bench_prefix))
     cfg.run_data.gitref = cfg.repo_branch
 
-    os.chdir(str(workdir))
-    bench_gitclone()
-    os.chdir(str(workdir / 'bitcoin'))
+    bench_gitclone(cfg.run_data.src_dir)
+    os.chdir(str(cfg.run_data.src_dir))
 
     for commit in get_commits():
         if commit != 'HEAD':
@@ -363,12 +384,12 @@ class Command:
     """
     Manages the running of a subprocess for a certain benchmark.
     """
-
     def __init__(self, cmd: str, bench_name: str):
-        self.cmd: str = cmd
+        self.cmd = cmd
         self.bench_name = bench_name
         self.ps = None
         self.start_time = None
+        self.end_time = None
         self.stdout = None
         self.stderr = None
 
@@ -392,8 +413,8 @@ class Command:
     @property
     def memusage_kib(self) -> int:
         if self.returncode is None:
-            None
-        return int(self.stderr.strip().split('\n')[-1])
+            return sh.get_proc_peakmem_kib(self.ps)
+        return int(self.stderr.decode().strip().split('\n')[-1])
 
     def check_for_failure(self):
         """
@@ -424,7 +445,7 @@ class Command:
 
             if self.total_secs < one_hour_secs:
                 logger.warning("IBD finished implausibly quickly")
-                failed = True
+                # failed = True
 
         if self.returncode != 0:
             failed = True
@@ -445,12 +466,22 @@ class Command:
 
         return failed
 
-    def report_to_codespeed(self, cfg, executable: str, name: str = None):
+    def report_to_codespeed(self,
+                            cfg,
+                            executable: str,
+                            name: str = None,
+                            extra_data: dict = None):
         name = name or self.bench_name
 
         NAME_TO_TIME[cfg.run_data.gitref][name].append(self.total_secs)
-        endpoints.send_to_codespeed(cfg, name, self.total_secs, executable)
+        endpoints.send_to_codespeed(
+            cfg, name, self.total_secs, executable,
+            extra_data=extra_data,
+        )
 
+        # This may be called before the command has completed (in the case of
+        # incremental IBD reports), so only report memory usage if we have
+        # access to it.
         if self.memusage_kib is not None:
             mem_name = name + '.mem-usage'
             NAME_TO_TIME[cfg.run_data.gitref][mem_name].append(
@@ -484,7 +515,7 @@ class IBDCommand(Command):
 
         run_bitcoind_cmd = (
             './src/bitcoind -datadir={}/bitcoin/data '
-            '-dbcache={} -txindex=1 '
+            '-dbcache={} -rpcuser=foo -rpcpassword=bar -txindex=1 '
             '{} -debug=all -assumevalid={} '
             '-port={} -rpcport={} {} {}'.format(
                 cfg.run_data.workdir,
@@ -503,16 +534,25 @@ class IBDCommand(Command):
         if reindex:
             run_bitcoind_cmd += " -reindex"
 
-        super(IBDCommand, self).__init__(bench_name, run_bitcoind_cmd)
+        super().__init__(run_bitcoind_cmd, bench_name)
 
     @classmethod
     def from_cfg(cls, bench_name, **kwargs):
         return cls(
-            cfg.run_data.workdir,
+            bench_name,
             dbcache=cfg.bitcoind_dbcache,
             assumevalid=cfg.bitcoind_assumevalid,
             **kwargs,
         )
+
+    def join(self):
+        """
+        When stopatheight isn't set, bitcoind will run for perpetuity unless
+        we stop it.
+        """
+        if not self.stopatheight:
+            bitcoind.stop_via_rpc(cfg, self.ps)
+        super().join()
 
 
 def _try_execute_and_report(
@@ -533,16 +573,35 @@ def _try_execute_and_report(
         if i == (num_tries - 1):
             return False
 
-    cmd.send_final_bench_scores(cfg, executable)
+    cmd.report_to_codespeed(cfg, executable)
+
+
+class SlackLogHandler(logging.Handler):
+    def emit(self, record):
+        fmtd = self.format(record)
+
+        # If the log is multiple lines, treat the first line as the title and
+        # the remainder as text.
+        title, *rest = fmtd.split('\n', 1)
+        return endpoints.send_to_slack_attachment(
+            cfg, title, {}, text=(rest[0] if rest else None), success=False)
+
+
+def attach_slack_handler_to_logger(logger):
+    """Can't do this in .logging because we need a cfg argument."""
+    slack = SlackLogHandler()
+    slack.setLevel(logging.WARNING)
+    slack.setFormatter(logging.Formatter('%(message)s'))
+    logger.addHandler(slack)
 
 
 def main():
     global cfg
     global logger
     cfg = config.parse_args()
-    logger = cfg.logger
 
     atexit.register(_clean_shutdown)
+    attach_slack_handler_to_logger(logger)
 
     logger.info("Running with configuration:")
     logger.info("")

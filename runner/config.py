@@ -7,6 +7,8 @@ import multiprocessing
 
 from . import logging
 
+logger = logging.get_logger()
+
 # Get physical memory specs
 MEM_GIB = (
     os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024. ** 3))
@@ -51,6 +53,14 @@ class RunData:
     lockfile_acquired = False
 
     compiler = None
+
+    @property
+    def src_dir(self):
+        return self.workdir / 'bitcoin'
+
+    @property
+    def data_dir(self):
+        return self.src_dir / 'data'
 
 
 def build_parser():
@@ -109,6 +119,9 @@ def build_parser():
            'Additional arguments to pass to the bitcoind invocation for '
            'the synced IBD peer, e.g. -minimumchainwork')
 
+    addarg('SYNCED_BITCOIND_RPCPORT', '8332',
+           'The RPC port the synced node will respond on')
+
     addarg('IBD_CHECKPOINTS',
            '100_000,200_000,300_000,400_000,500_000,522_000',
            'Chain heights at which duration measurements will be reported '
@@ -154,7 +167,7 @@ def build_parser():
 
     addarg('BITCOIND_RPCPORT', '9004')
 
-    addarg('LOG_LEVEL', 'DEBUG')
+    addarg('LOG_LEVEL', 'INFO')
 
     addarg('NPROC', min(4, int(multiprocessing.cpu_count())), type=int)
 
@@ -191,7 +204,7 @@ def parse_args(*args, **kwargs):
     args.benches_to_run = list(filter(None, args.benches_to_run))
     args.compilers = list(sorted(args.compilers))
 
-    args.logger = logging.get_logger(args.log_level)
+    logging.configure_logger(args.log_level)
     args.run_data = RunData()
     args.running_synced_bitcoind_locally = False
 
@@ -207,12 +220,12 @@ def parse_args(*args, **kwargs):
     if args.ibd_peer_address in ('localhost', '127.0.0.1', '0.0.0.0'):
         args.running_synced_bitcoind_locally = True
         args.ibd_peer_address = '127.0.0.1'
-        args.logger.info(
+        logger.info(
             "Running synced chain node on localhost "
             "(no remote addr specified)")
     elif not args.ibd_peer_address:
         args.ibd_from_network = True
-        args.logger.info(
+        logger.info(
             "Running a REAL IBD from the P2P network. "
             "This may result in inconsistent IBD times.")
 

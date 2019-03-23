@@ -1,7 +1,10 @@
 import requests
 import json
+import logging
 
 from . import config
+
+logger = logging.getLogger('bitcoinperf')
 
 
 def send_to_codespeed(
@@ -36,7 +39,7 @@ def send_to_codespeed(
         'extra_data': extra_data or {},
     }
 
-    cfg.logger.debug(
+    logger.debug(
         "Attempting to send benchmark (%s, %s) to codespeed",
         bench_name, result)
 
