@@ -62,28 +62,16 @@ $ ./bin/dev test
 ### Quick use for local smoke tests
 
 ```
- - BITCOIND_STOPATHEIGHT=230000
-      - IBD_PEER_ADDRESS=localhost
-      - SYNCED_DATA_DIR=/bitcoin/data
-      - SYNCED_BITCOIN_REPO_DIR=/bitcoin
-      - CODESPEED_URL=http://codespeed:8000
-      - CODESPEED_USER=admin
-      - CODESPEED_PASSWORD=password
-      - CODESPEED_ENVNAME=ccl-bench-hdd-1
-      - NO_CAUTION=1  # Can't drop caches from within a container.
-      - MAKE_JOBS=5
-      - COMPILERS=clang
-      - BENCHES_TO_RUN=gitclone,build,ibd,reindex
-      # Set minimumchainwork low so that we actually latch out of IBD at low
-      # heights.
-      - SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00
+# Compare the v0.16.0 tag to current master for an IBD up to height 200,000.
+#
+# Do a total of 3 IBDs (`ibd:3`) for each commit.
+#
 bitcoinperf \
   --commits "v0.16.0,master" \
   --make-jobs $(nproc --ignore=1) \
   --ibd-peer-address localhost \
   --synced-data-dir /data/bitcoin_bench \
   --synced-bitcoin-repo-dir "${HOME}/src/bitcoin_bench" \
-  --synced-bitcoind-args=-minimumchainwork=0x00
   --codespeed-url=http://localhost:8000 \
   --codespeed-user=admin \
   --codespeed-password=password \

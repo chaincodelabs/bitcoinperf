@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Run a series of benchmarks against a particular Bitcoin Core revision.
+Run a series of benchmarks against a particular Bitcoin Core revision(s).
 
-See bin/run_bench for a sample invocation.
+See bin/runlocal.sh for a sample invocation.
 
 """
 import re
@@ -20,6 +20,8 @@ import logging.handlers
 import traceback
 from collections import defaultdict
 from pathlib import Path
+
+import requests
 
 from . import output, config, endpoints, bitcoind, sh
 from .logging import get_logger
@@ -325,8 +327,16 @@ def run_benches():
 
     for commit in get_commits():
         if commit != 'HEAD':
-            logger.info("Checking out commit %s", commit)
-            run("git checkout %s" % commit)
+
+            # Allow users to specify commits in different remotes.
+            if ':' in commit:
+                remote, commit = commit.split(':')
+                run("git add remote {} https://github.com/{}/bitcoin.git"
+                    .format(remote, remote))
+                run("git fetch {}".format(remote))
+
+            logger.info("Checking out commit {}".format(commit))
+            run("git checkout {}".format(commit))
 
         cfg.run_data.gitref = commit
         cfg.run_data.gitsha = subprocess.check_output(
@@ -474,10 +484,18 @@ class Command:
         name = name or self.bench_name
 
         NAME_TO_TIME[cfg.run_data.gitref][name].append(self.total_secs)
-        endpoints.send_to_codespeed(
-            cfg, name, self.total_secs, executable,
-            extra_data=extra_data,
-        )
+
+        try:
+            endpoints.send_to_codespeed(
+                cfg, name, self.total_secs, executable,
+                extra_data=extra_data,
+            )
+        except requests.exceptions.ConnectionError:
+            if cfg.no_caution:
+                # Whatever, we don't have a codespeed server available
+                pass
+            else:
+                raise
 
         # This may be called before the command has completed (in the case of
         # incremental IBD reports), so only report memory usage if we have
@@ -486,9 +504,17 @@ class Command:
             mem_name = name + '.mem-usage'
             NAME_TO_TIME[cfg.run_data.gitref][mem_name].append(
                 self.memusage_kib)
-            endpoints.send_to_codespeed(
-                cfg, mem_name, self.memusage_kib, executable,
-                units_title='Size', units='KiB')
+
+            try:
+                endpoints.send_to_codespeed(
+                    cfg, mem_name, self.memusage_kib, executable,
+                    units_title='Size', units='KiB')
+            except requests.exceptions.ConnectionError:
+                if cfg.no_caution:
+                    # Whatever, we don't have a codespeed server available
+                    pass
+                else:
+                    raise
 
 
 class IBDCommand(Command):

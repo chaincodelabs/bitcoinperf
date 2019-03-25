@@ -20,10 +20,10 @@ export SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00
 
 if [ ! -f "/tmp/bitcoinperf-workdir" ]; then
   export BENCHES_TO_RUN=gitclone,build
-  bitcoinperf --commits "v0.16.0,master" | \
+  bitcoinperf --no-caution --commits "v0.16.0,master" | \
     grep "leaving workdir at" | \
     grep -Eo "(/tmp/.*)" \
     > /tmp/bitcoinperf-workdir
 else
-  bitcoinperf --commits "master" --workdir "$(cat /tmp/bitcoinperf-workdir)" "$@"
+  bitcoinperf --no-caution --commits "master" --workdir "$(cat /tmp/bitcoinperf-workdir)" "$@"
 fi
