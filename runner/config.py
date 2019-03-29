@@ -4,8 +4,10 @@ import os
 import sys
 import datetime
 import multiprocessing
+import typing as t
+from pathlib import Path
 
-from . import logging
+from . import logging, results, slack
 
 logger = logging.get_logger()
 
@@ -17,50 +19,6 @@ HOSTNAME = socket.gethostname()
 BENCH_NAMES = {
     'gitclone', 'build', 'makecheck', 'functionaltests',
     'microbench', 'ibd', 'reindex'}
-
-
-BENCH_SPECIFIC_BITCOIND_ARGS = (
-    # To "complete" (i.e. latch false out of) initialblockdownload for
-    # stopatheight for a lowish height, we need to set a very large maxtipage.
-    '-maxtipage=99999999999999999999 '
-
-    # If we don't set minimumchainwork to 0, low heights may cause the syncing
-    # peer to never download blocks and thus hang indefinitely during IBD.
-    # See https://github.com/bitcoin/bitcoin/blob/e83d82a85c53196aff5b5ac500f20bb2940663fa/src/net_processing.cpp#L517-L521  # noqa
-    '-minimumchainwork=0x00 '
-
-    # Output buffering into memory during ps.communicate() can cause OOM errors
-    # on machines with small memory, so only output to debug.log files in disk.
-    '-printtoconsole=0 '
-)
-
-
-class RunData:
-    """
-    Data set at runtime during benchmarking.
-
-    Attached to `args` and passed around that way.
-    """
-    gitsha = None
-
-    # The non-SHA name of the ref being tested.
-    gitref = None
-
-    # The working directory for this benchmark. Contains a `bitcoin/` subdir.
-    workdir = None
-
-    # Did we acquire the benchmarking lockfile?
-    lockfile_acquired = False
-
-    compiler = None
-
-    @property
-    def src_dir(self):
-        return self.workdir / 'bitcoin'
-
-    @property
-    def data_dir(self):
-        return self.src_dir / 'data'
 
 
 def build_parser():
@@ -87,6 +45,12 @@ def build_parser():
     def csv_type(s):
         return s.split(',')
 
+    def path_type(p):
+        if not p:
+            return None
+        else:
+            return Path(p)
+
     def name_to_count_type(s):
         if not s:
             return {}
@@ -110,10 +74,19 @@ def build_parser():
     addarg('SYNCED_DATA_DIR', '',
            'When using a local IBD peer, specify a path to a datadir synced '
            'to a chain high enough to do the requested IBD '
-           '(see --bitcoind-stopatheight)')
+           '(see --bitcoind-stopatheight)',
+           type=path_type)
+
+    addarg('CLIENT_DATADIR_SRC', '',
+           'Specify a datadir that the client will use manually. This datadir '
+           'will be copied and then modified by the client bitcoind process. '
+           'This is useful for specifying a non-trivial starting height '
+           'to more quickly test IBD.',
+           type=path_type)
 
     addarg('SYNCED_BITCOIN_REPO_DIR', os.environ['HOME'] + '/bitcoin',
-           'Where the bitcoind binary which will serve blocks for IBD lives')
+           'Where the bitcoind binary which will serve blocks for IBD lives',
+           type=path_type)
 
     addarg('SYNCED_BITCOIND_ARGS', '',
            'Additional arguments to pass to the bitcoind invocation for '
@@ -123,7 +96,7 @@ def build_parser():
            'The RPC port the synced node will respond on')
 
     addarg('IBD_CHECKPOINTS',
-           '100_000,200_000,300_000,400_000,500_000,522_000',
+           '100_000,200_000,300_000,400_000,500_000,522_000,tip',
            'Chain heights at which duration measurements will be reported '
            'to codespeed. Can include underscores. E.g. 100_000,200_000')
 
@@ -193,7 +166,7 @@ def build_parser():
         'bench-raspi-1': 'ccl-bench-raspi-1',
         'bench-hdd-1': 'ccl-bench-hdd-1',
         'bench-ssd-1': 'ccl-bench-ssd-1',
-    }.get(HOSTNAME))
+    }.get(HOSTNAME, ''))
 
     return parser
 
@@ -205,7 +178,6 @@ def parse_args(*args, **kwargs):
     args.compilers = list(sorted(args.compilers))
 
     logging.configure_logger(args.log_level)
-    args.run_data = RunData()
     args.running_synced_bitcoind_locally = False
 
     args.bench_prefix = (
@@ -229,10 +201,19 @@ def parse_args(*args, **kwargs):
             "Running a REAL IBD from the P2P network. "
             "This may result in inconsistent IBD times.")
 
+    args.codespeed_reporter = None
+
     if args.codespeed_url:
         assert(args.codespeed_user)
         assert(args.codespeed_password)
         assert(args.codespeed_envname)
+        args.codespeed_report = results.CodespeedReporter(
+            args.codespeed_url,
+            args.codespeed_envname,
+            args.codespeed_user,
+            args.codespeed_password)
+
+    args.slack_client = slack.Client(args.slack_webhook_url)
 
     for name in args.benches_to_run:
         if name not in BENCH_NAMES:
@@ -245,3 +226,20 @@ def parse_args(*args, **kwargs):
             sys.exit(1)
 
     return args
+
+
+def get_commits(cfg) -> t.List[t.Tuple[str, str]]:
+    cfg.commits = list(filter(None, cfg.commits))
+
+    if not cfg.commits:
+        return [('', 'HEAD')]
+    commits = []
+
+    for commit in cfg.commits:
+        # Allow users to specify commits in different remotes.
+        remote = ''
+        if ':' in commit:
+            remote, commit = commit.split(':')
+        commits.append((remote, commit))
+
+    return commits

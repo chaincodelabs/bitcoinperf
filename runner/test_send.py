@@ -1,9 +1,7 @@
-from . import endpoints, config
+from . import config, results
+from .globals import GitCheckout
 
 
 def test_send_to_codespeed():
-    cfg = config.parse_args("")
-    cfg.run_data.gitsha = "f" * 32
-    cfg.run_data.gitref = "test"
-
-    endpoints.send_to_codespeed(cfg, "test_send_to_codespeed", 12, "py.test")
+    results.CodespeedReporter('', '', '', '').send_to_codespeed(
+        GitCheckout('', '', ''), "test_send_to_codespeed", 12, "py.test")

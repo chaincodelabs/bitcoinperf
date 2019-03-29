@@ -1,137 +1,266 @@
 import json
 import time
-import contextlib
 import typing as t
+import socket
+import subprocess
+import shutil
 from pathlib import Path
 
-from . import sh, config, logging
+from . import sh, logging
 
 logger = logging.get_logger()
 
 
-def call_rpc(cfg, cmd,
-             on_synced=False,
-             deserialize_output=True,
-             quiet=False,
-             ) -> t.Optional[dict]:
+_BENCH_SPECIFIC_BITCOIND_ARGS = (
+    # To "complete" (i.e. latch false out of) initialblockdownload for
+    # stopatheight for a lowish height, we need to set a very large maxtipage.
+    '-maxtipage=99999999999999999999 '
+
+    # If we don't set minimumchainwork to 0, low heights may cause the syncing
+    # peer to never download blocks and thus hang indefinitely during IBD.
+    # See https://github.com/bitcoin/bitcoin/blob/e83d82a85c53196aff5b5ac500f20bb2940663fa/src/net_processing.cpp#L517-L521  # noqa
+    '-minimumchainwork=0x00 '
+
+    # Output buffering into memory during ps.communicate() can cause OOM errors
+    # on machines with small memory, so only output to debug.log files in disk.
+    '-printtoconsole=0 '
+)
+
+
+class Node:
     """
-    Call some bitcoin RPC command and return its deserialized output.
+    Maintains a subprocess instance pointing to a running bitcoind process,
+    provides easy access to the node via RPC.
     """
-    repodir = cfg.run_data.src_dir
-    datadir = cfg.run_data.data_dir
-    rpcport = cfg.bitcoind_rpcport
-    extra_args = "-rpcuser=foo -rpcpassword=bar"
+    # Keep a class-level listing of all created nodes so that we can
+    # ensure shutdown.
+    all_instances = []
 
-    if on_synced:
-        repodir = cfg.synced_bitcoin_repo_dir
-        datadir = cfg.synced_data_dir
-        rpcport = cfg.synced_bitcoind_rpcport
-        extra_args = ""
+    def __init__(self,
+                 bitcoind_bin_path,
+                 datadir,
+                 copy_from_datadir: Path = None,
+                 port: int = None,
+                 rpcport: int = None,
+                 extra_args: str = None,
+                 ):
+        """
+        Kwargs:
+            copy_from_datadir: if specified, initialize the datadir contents of
+                this node from the specified path.
 
-    info_call = sh.run(
-        "{}/src/bitcoin-cli -rpcport={} -datadir={} {} {}".format(
-            repodir, rpcport, datadir, extra_args, cmd),
-        check_returncode=False)
+            If port and rpcport are left unspecified, unused ports will be
+                found and used automatically.
+        """
+        self.bitcoind_bin_path = bitcoind_bin_path
+        self.bitcoincli_bin_path = bitcoind_bin_path.parent / 'bitcoin-cli'
+        self.datadir = datadir
+        self.port = port or _find_unused_port()
+        self.rpcport = rpcport or _find_unused_port(self.port + 1)
+        self.extra_args = extra_args or ''
 
-    if info_call[2] != 0:
-        logger.debug(
-            "non-zero returncode from synced bitcoind status check: %s",
-            info_call)
-        return None
+        self.datadir.mkdir(exist_ok=True)
+        if copy_from_datadir:
+            shutil.copytree(copy_from_datadir, self.datadir)
 
-    if not deserialize_output:
-        logger.info("rpc: %r -> %r", cmd, info_call[0])
-    else:
-        logger.debug("response for %r:\n%s",
-                     cmd, json.loads(info_call[0].decode()))
+        self.cmd: sh.Command = None
+        # Arguments this node has been started with.
+        self.started_args = []
 
-    return json.loads(info_call[0].decode()) if deserialize_output else None
+        Node.all_instances.append(self)
+
+    def __repr__(self):
+        return "<Node datadir={} port={} rpcport={} pid={}>".format(
+            self.datadir, self.port, self.rpcport,
+            self.ps.pid if self.ps else None)
+
+    __str__ = __repr__
+
+    @property
+    def is_process_alive(self):
+        self.ps.poll()
+        return self.ps and self.ps.returncode is None
+
+    @property
+    def ps(self):
+        if not self.cmd or not self.cmd.ps:
+            return None
+        return self.cmd.ps
+
+    def start(self, **kwargs):
+        self.started_args.append(dict(kwargs))
+        cmd = ''
+
+        if 'dbcache' in kwargs:
+            cmd += '-dbcache={} '.format(kwargs.pop('dbcache'))
+        if 'txindex' in kwargs:
+            cmd += '-txindex={} '.format(kwargs.pop('txindex'))
+        if 'assumevalid' in kwargs:
+            cmd += '-assumevalid={} '.format(kwargs.pop('assumevalid'))
+        if 'stopatheight' in kwargs:
+            cmd += '-stopatheight={} '.format(kwargs.pop('stopatheight'))
+        if 'listen' in kwargs:
+            cmd += '-listen={} '.format(kwargs.pop('listen'))
+        if 'connect' in kwargs:
+            cmd += '-connect={} '.format(kwargs.pop('connect'))
+        if 'addnode' in kwargs:
+            cmd += '-addnode={} '.format(kwargs.pop('addnode'))
+
+        cmd += '-debug={} '.format(kwargs.pop('debug', 'all'))
+        cmd += '{} -port={} -rpcport={}'.format(
+            _BENCH_SPECIFIC_BITCOIND_ARGS, self.port, self.rpcport)
+
+        run_cmd = '{} -datadir={} {} {}'.format(
+            self.bitcoind_bin_path, self.datadir, self.extra_args, cmd)
+
+        self.start_time = time.time()
+        self.cmd = sh.Command(run_cmd, 'run node'.format(self))
+        self.cmd.start()
+        logger.info("command '%s' starting for %s", run_cmd, self)
+
+    def wait_for_init(self, require_height=None):
+        """
+        Wait for the node to initialize, return the starting height.
+
+        If require_height is given, ensure that the node starts having a chain
+        at least `require_height` high.
+        """
+        num_tries = 1000
+        sleep_time_secs = 0.1
+        bitcoind_up = False
+
+        while num_tries > 0 and self.is_process_alive and not bitcoind_up:
+            info = self.call_rpc("getblockchaininfo")
+
+            if info and require_height and info["blocks"] < require_height:
+                # Stop process; we're exiting.
+                self.stop_via_rpc()
+                raise RuntimeError(
+                    "bitcoind node doesn't have enough blocks (%s vs. %s)" %
+                    (info['blocks'], require_height))
+            elif info:
+                bitcoind_up = True
+            else:
+                num_tries -= 1
+                time.sleep(sleep_time_secs)
+
+        if not self.is_process_alive:
+            self.cmd.join()
+            raise RuntimeError(
+                "Node process died (code {})\nCommand:\n{}\n\n"
+                "stdout:\n\n{}\n\nstderr:\n\n{}\n".format(
+                    self.cmd.returncode,
+                    self.cmd.cmd,
+                    self.cmd.stderr,
+                    self.cmd.stdout))
+
+        if not bitcoind_up:
+            raise RuntimeError("Couldn't bring node up: {}".format(self))
+
+    def call_rpc(self, cmd,
+                 deserialize_output=True,
+                 quiet=False,
+                 ) -> t.Optional[dict]:
+        """
+        Call some bitcoin RPC command and return its deserialized output.
+        """
+        call = sh.run(
+            "{} -rpcport={} -datadir={} {}".format(
+                self.bitcoincli_bin_path, self.rpcport, self.datadir, cmd),
+            check_returncode=False)
+
+        # Ignore these lest we spam the logs.
+        insignificant_errors = [
+            "Rewinding blocks...",
+            "Loading block index...",
+            "Verifying blocks...",
+        ]
+
+        if call[2] != 0:
+            if not any(i in call[1].decode() for i in insignificant_errors):
+                logger.debug("non-zero returncode from RPC call (%s): %s",
+                             self, call)
+            return None
+
+        if not deserialize_output:
+            logger.info("rpc: %r -> %r", cmd, call[0])
+        else:
+            logger.debug("response for %r:\n%s",
+                         cmd, json.loads(call[0].decode()))
+
+        return json.loads(call[0].decode()) if deserialize_output else None
+
+    def stop_via_rpc(self):
+        logger.info("Calling stop on %s", self)
+        self.call_rpc("stop", deserialize_output=False)
+        self.ps.wait(timeout=120)
+
+    def terminate(self):
+        logger.warning("Terminating %s", self)
+        self.ps.terminate()
+
+    def empty_datadir(self):
+        """Ensure empty data before each IBD."""
+        sh.run("rm -rf %s" % self.datadir, check_returncode=False)
+        if not self.datadir.exists():
+            self.datadir.mkdir()
+
+    def check_disk_low(self):
+        disk_warning_ps = subprocess.run(
+            ("tail -n 10000 {}/debug.log | "
+             "grep 'Disk space is low!' ").format(self.datadir),
+            shell=True)
+
+        # True if we're low on disk
+        return disk_warning_ps.returncode == 0
+
+    def check_for_failure(self):
+        if self.check_disk_low():
+            return True
+        return False
+
+    def join(self):
+        return self.cmd.join()
 
 
-def stop_via_rpc(cfg, ps, on_synced=False):
-    logger.info("Calling stop on bitcoind ps %s", ps)
-    call_rpc(cfg, "stop", on_synced=on_synced, deserialize_output=False)
-    ps.wait(timeout=120)
+def _find_unused_port(startval=8888) -> int:
+    """Return an unused port."""
+    portbad = True
+    portnum = startval
+
+    while portbad:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(("127.0.0.1", portnum))
+        except socket.error:
+            portnum += 1
+        else:
+            portbad = False
+        finally:
+            s.close()
+
+    return portnum
 
 
-def empty_datadir(bitcoin_src_dir: Path):
-    """Ensure empty data before each IBD."""
-    datadir = bitcoin_src_dir / 'data'
-    sh.run("rm -rf %s" % datadir, check_returncode=False)
-    if not datadir.exists():
-        datadir.mkdir()
-
-
-@contextlib.contextmanager
-def run_synced_bitcoind(cfg):
+def get_synced_node(cfg) -> t.Optional[Node]:
     """
-    Context manager which spawns (and cleans up) a bitcoind instance that has a
-    synced chain high enough to service an IBD up to BITCOIND_STOPATHEIGHT.
+    Spawns a bitcoind instance that has a synced chain high enough to service
+    an IBD up to BITCOIND_STOPATHEIGHT.
+
+    Must be cleaned up by the caller.
     """
     if not cfg.running_synced_bitcoind_locally:
         # If we're not running a node locally, don't worry about setup and
         # teardown.
-        yield
-        return
+        return None
 
-    bitcoinps = sh.popen(
-        # Relies on bitcoind being precompiled and synced chain data existing
-        # in /bitcoin_data; see runner/Dockerfile.
-        "%s/src/bitcoind -rpcport=%s -datadir=%s -noconnect -listen=1 %s %s"
-        % (
-            cfg.synced_bitcoin_repo_dir, cfg.synced_bitcoind_rpcport,
-            cfg.synced_data_dir,
-            config.BENCH_SPECIFIC_BITCOIND_ARGS, cfg.synced_bitcoind_args,
-            ))
+    server = Node(
+        cfg.synced_bitcoin_repo_dir / 'src' / 'bitcoind',
+        cfg.synced_data_dir,
+        extra_args=cfg.synced_bitcoind_args,
+    )
+    server.start(connect=0, listen=1)
+    server.wait_for_init(int(cfg.bitcoind_stopatheight))
+    logger.info("synced node is active (pid %s)", server.ps.pid)
 
-    logger.info(
-        "started synced node with '%s' (pid %s)",
-        bitcoinps.args, bitcoinps.pid)
-
-    # Wait for bitcoind to come up.
-    num_tries = 100
-    sleep_time_secs = 2
-    bitcoind_up = False
-
-    while num_tries > 0 and bitcoinps.returncode is None and not bitcoind_up:
-        info = call_rpc(cfg, "getblockchaininfo", on_synced=True)
-        info_call = sh.run(
-            "{}/src/bitcoin-cli -datadir={} getblockchaininfo".format(
-                cfg.synced_bitcoin_repo_dir, cfg.synced_data_dir),
-            check_returncode=False)
-
-        if info_call[2] == 0:
-            info = json.loads(info_call[0].decode())
-        else:
-            logger.debug(
-                "non-zero returncode (%s) from synced bitcoind status check",
-                info_call[2])
-
-        if info and info["blocks"] < int(cfg.bitcoind_stopatheight):
-            # Stop process; we're exiting.
-            stop_via_rpc(cfg, bitcoinps, on_synced=True)
-            raise RuntimeError(
-                "synced bitcoind node doesn't have enough blocks "
-                "(%s vs. %s)" %
-                (info['blocks'], int(cfg.bitcoind_stopatheight)))
-        elif info:
-            bitcoind_up = True
-        else:
-            num_tries -= 1
-            time.sleep(sleep_time_secs)
-
-    if not bitcoind_up:
-        raise RuntimeError("Couldn't bring synced node up")
-
-    logger.info("synced node is active (pid %s) %s", bitcoinps.pid, info)
-
-    try:
-        yield
-    finally:
-        logger.info("shutting down synced node (pid %s)", bitcoinps.pid)
-        stop_via_rpc(cfg, bitcoinps, on_synced=True)
-
-        if bitcoinps.returncode != 0:
-            logger.warning(
-                "synced bitcoind returned with nonzero return code "
-                "%s" % bitcoinps.returncode)
+    return server
