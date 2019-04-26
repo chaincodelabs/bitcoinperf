@@ -61,6 +61,7 @@ class Node:
 
         self.datadir.mkdir(exist_ok=True)
         if copy_from_datadir:
+            shutil.rmtree(self.datadir)
             shutil.copytree(copy_from_datadir, self.datadir)
 
         self.cmd: sh.Command = None
@@ -116,18 +117,22 @@ class Node:
         self.start_time = time.time()
         self.cmd = sh.Command(run_cmd, 'run node'.format(self))
         self.cmd.start()
-        logger.info("command '%s' starting for %s", run_cmd, self)
+        logger.info("starting node with datadir %s", self.datadir)
+        logger.debug("command '%s' starting for %s", run_cmd, self)
 
-    def wait_for_init(self, require_height=None):
+    def wait_for_init(self, require_height=None) -> int:
         """
         Wait for the node to initialize, return the starting height.
 
         If require_height is given, ensure that the node starts having a chain
         at least `require_height` high.
+
+        Returns block count.
         """
         num_tries = 1000
         sleep_time_secs = 0.1
         bitcoind_up = False
+        block_count = None
 
         while num_tries > 0 and self.is_process_alive and not bitcoind_up:
             info = self.call_rpc("getblockchaininfo")
@@ -140,6 +145,7 @@ class Node:
                     (info['blocks'], require_height))
             elif info:
                 bitcoind_up = True
+                block_count = int(info['blocks'])
             else:
                 num_tries -= 1
                 time.sleep(sleep_time_secs)
@@ -156,6 +162,8 @@ class Node:
 
         if not bitcoind_up:
             raise RuntimeError("Couldn't bring node up: {}".format(self))
+
+        return block_count
 
     def call_rpc(self, cmd,
                  deserialize_output=True,
@@ -183,7 +191,7 @@ class Node:
             return None
 
         if not deserialize_output:
-            logger.info("rpc: %r -> %r", cmd, call[0])
+            logger.debug("rpc: %r -> %r", cmd, call[0])
         else:
             logger.debug("response for %r:\n%s",
                          cmd, json.loads(call[0].decode()))
@@ -245,7 +253,7 @@ def _find_unused_port(startval=8888) -> int:
 def get_synced_node(cfg) -> t.Optional[Node]:
     """
     Spawns a bitcoind instance that has a synced chain high enough to service
-    an IBD up to BITCOIND_STOPATHEIGHT.
+    an IBD up to the last checkpoint (`--ibd-checkpoints`).
 
     Must be cleaned up by the caller.
     """
@@ -256,11 +264,11 @@ def get_synced_node(cfg) -> t.Optional[Node]:
 
     server = Node(
         cfg.synced_bitcoin_repo_dir / 'src' / 'bitcoind',
-        cfg.synced_data_dir,
+        cfg.synced_datadir,
         extra_args=cfg.synced_bitcoind_args,
     )
     server.start(connect=0, listen=1)
-    server.wait_for_init(int(cfg.bitcoind_stopatheight))
+    server.wait_for_init(require_height=cfg.last_ibd_checkpoint)
     logger.info("synced node is active (pid %s)", server.ps.pid)
 
     return server

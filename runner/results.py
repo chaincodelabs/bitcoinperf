@@ -25,8 +25,11 @@ def save_result(gitco: GitCheckout,
     REF_TO_NAME_TO_TIME[gitco.ref][benchmark_name].append(total_secs)
 
     for reporter in reporters:
-        reporter.save_result(
-            benchmark_name, total_secs, executable, extra_data)
+        try:
+            reporter.save_result(
+                benchmark_name, total_secs, executable, extra_data)
+        except Exception:
+            logger.exception("failed to save result with %s", reporter)
 
     # This may be called before the command has completed (in the case of
     # incremental IBD reports), so only report memory usage if we have
@@ -53,9 +56,9 @@ class LogReporter:
     """Log results."""
     def save_result(self, *args, **kwargs):
         resstr = "result: "
-        resstr += ",".join(args)
-        resstr += ",".join(kwargs.values())
-        logger.debug(resstr)
+        resstr += ",".join(str(i) for i in args)
+        resstr += ",".join(str(i) for i in kwargs.values())
+        logger.info(resstr)
 
 
 class CodespeedReporter:

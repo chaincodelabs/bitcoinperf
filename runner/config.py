@@ -71,22 +71,24 @@ def build_parser():
            'Network address to synced peer to IBD from. If left blank, '
            'IBD will be done from the mainnet P2P network.')
 
-    addarg('SYNCED_DATA_DIR', '',
+    addarg('SYNCED_DATADIR', '',
            'When using a local IBD peer, specify a path to a datadir synced '
-           'to a chain high enough to do the requested IBD '
-           '(see --bitcoind-stopatheight)',
+           'to a chain high enough to do the requested IBD.',
            type=path_type)
 
-    addarg('CLIENT_DATADIR_SRC', '',
-           'Specify a datadir that the client will use manually. This datadir '
-           'will be copied and then modified by the client bitcoind process. '
-           'This is useful for specifying a non-trivial starting height '
-           'to more quickly test IBD.',
+    addarg('COPY_FROM_DATADIR', '',
+           'Initialize the downloading peer with a datadir from this path. '
+           'The datadir will be copied on disk. Useful for starting from a '
+           'non-trivial height using a pruned datadir.',
            type=path_type)
 
     addarg('SYNCED_BITCOIN_REPO_DIR', os.environ['HOME'] + '/bitcoin',
            'Where the bitcoind binary which will serve blocks for IBD lives',
            type=path_type)
+
+    addarg('CLIENT_BITCOIND_ARGS', '',
+           'Additional arguments to pass to the bitcoind invocation for '
+           'the downloading client node, e.g. "-prune=10000"')
 
     addarg('SYNCED_BITCOIND_ARGS', '',
            'Additional arguments to pass to the bitcoind invocation for '
@@ -128,8 +130,6 @@ def build_parser():
 
     addarg('BITCOIND_DBCACHE', '2048' if MEM_GIB > 3 else '512')
 
-    addarg('BITCOIND_STOPATHEIGHT', '522000')
-
     addarg('BITCOIND_ASSUMEVALID',
            '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876',
            help=('Should be set to a known block (e.g. the block hash of '
@@ -156,6 +156,11 @@ def build_parser():
     addarg('NO_CLEAN', False,
            "If true, do not call `make distclean` before builds. Useful for "
            "when you don't care about build times.", type=bool)
+
+    addarg('USE_BUILD_CACHE', False,
+           "If true, cache the builds per commit (useful for testing) under "
+           "~/.bitcoinperf",
+           type=bool)
 
     addarg('CODESPEED_USER', '')
 
@@ -224,6 +229,18 @@ def parse_args(*args, **kwargs):
         if comp not in {'gcc', 'clang'}:
             print("Unrecognized compiler name %r" % comp)
             sys.exit(1)
+
+    args.ibd_checkpoints_as_ints = []
+
+    for checkpoint in args.ibd_checkpoints.split(','):
+        if checkpoint != 'tip':
+            args.ibd_checkpoints_as_ints.append(int(
+                checkpoint.replace("_", "")))
+
+    args.ibd_to_tip = 'tip' in args.ibd_checkpoints
+    args.last_ibd_checkpoint = (
+        args.ibd_checkpoints_as_ints[-1] if
+        args.ibd_checkpoints_as_ints else None)
 
     return args
 

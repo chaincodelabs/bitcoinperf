@@ -4,10 +4,10 @@
 
 This repository consists of a few components
 
+- a haphazard Python script for running high-level Bitcoin Core benchmarks which
+  POSTs results to codespeed,
 - a [codespeed](https://github.com/chaincodelabs/codespeed) installation which
   collects and presents benchmarking results in a web interface, and
-- a haphazard Python script for running high-level Bitcoin Core benchmarks which
-  POSTs results to codespeed, and
 - a Grafana interface for presenting the benchmark results.
 
 The benchmarks which are monitored are
@@ -24,8 +24,17 @@ The Python script (`bitcoinperf`) may be used as a standalone script
 different Bitcoin commits locally - without necessarily writing to a remote
 codespeed instance.
 
+### Example local usage (no docker)
 
-### Example local usage
+```sh
+pip3 install --user .
+bitcoinperf --help
+```
+
+See the [examples/](examples/) for sample usages.
+
+
+### Example local usage (docker)
 
 First, you may have to modify the `synced` mountpoint in `docker-compose.yml`
 from `/data/bitcoin_bench` to a path on your machine that corresponds to a

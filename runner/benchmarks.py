@@ -2,6 +2,7 @@ import contextlib
 import os
 import time
 import datetime
+import shutil
 from pathlib import Path
 
 from . import bitcoind, results, sh
@@ -13,13 +14,14 @@ logger = get_logger()
 
 
 class Names:
-    IBD_REAL   = 'ibd.real.{height}.dbcache={dbcache}'
-    IBD_LOCAL  = 'ibd.local.{height}.dbcache={dbcache}'
-    REINDEX    = 'reindex.{height}.dbcache={dbcache}'
-    MICRO      = 'micro.{compiler}.{bench}'
-    FUNC_TESTS = 'functionaltests.{compiler}'
-    MAKE_CHECK = 'makecheck.{compiler}.{nproc}'
-    MAKE       = 'build.make.{j}.{compiler}'
+    IBD_REAL         = 'ibd.real.{height}.dbcache={dbcache}'
+    IBD_LOCAL        = 'ibd.local.{height}.dbcache={dbcache}'
+    IBD_LOCAL_RANGE  = 'ibd.local.{start_height}.{height}.dbcache={dbcache}'
+    REINDEX          = 'reindex.{height}.dbcache={dbcache}'
+    MICRO            = 'micro.{compiler}.{bench}'
+    FUNC_TESTS       = 'functionaltests.{compiler}'
+    MAKE_CHECK       = 'makecheck.{compiler}.{nproc}'
+    MAKE             = 'build.make.{j}.{compiler}'
 
 
 def benchmark(name):
@@ -57,9 +59,27 @@ def bench_gitclone(cfg, to_path: Path):
     run("git clone -b {} {} {}".format(
         cfg.repo_branch, cfg.repo_location, to_path))
 
+    # For all subsequent benchmarks, sit in the bitcoin/ dir.
+    os.chdir(G_.workdir / 'bitcoin')
+
 
 @benchmark('build')
 def bench_build(cfg):
+    cache = cfg.build_cache_path / G_.gitco.sha
+    if cfg.use_build_cache and cache.exists():
+        logger.info(
+            "Cached version of build %s found - "
+            "restoring from that and skipping build ", G_.gitco.sha)
+        os.chdir(G_.workdir)
+        if (G_.workdir / 'bitcoin').exists():
+            sh.rm(G_.workdir / 'bitcoin')
+        os.symlink(cache, G_.workdir / 'bitcoin')
+        os.chdir(G_.workdir / 'bitcoin')
+
+    if cfg.use_build_cache and cache.exists():
+        # We've restored from the cache in `bench_gitclone` above.
+        return
+
     logger.info("Building db4")
     run("./contrib/install_db4.sh .")
 
@@ -100,6 +120,10 @@ def bench_build(cfg):
             j=cfg.make_jobs, compiler=G_.compiler),
         "make -j %s" % cfg.make_jobs,
         executable='make')
+
+    if cfg.use_build_cache:
+        logger.info("Copying build to cache %s", cache)
+        shutil.copytree(G_.workdir / 'bitcoin',  cache)
 
 
 @benchmark('makecheck')
@@ -167,35 +191,26 @@ def bench_ibd(cfg):
     bench_name_fmt = (
         Names.IBD_REAL if cfg.ibd_from_network else Names.IBD_LOCAL)
 
-    checkpoints = list(sorted(
-        int(i) for i in cfg.ibd_checkpoints.replace("_", "").split(",")))
-    checkpoints = checkpoints or ['tip']
+    if cfg.copy_from_datadir:
+        bench_name_fmt = Names.IBD_LOCAL_RANGE
 
-    def report_ibd_result(command, height):
-        # Report to codespeed for this blockheight checkpoint
-        results.save_result(
-            G_.gitco,
-            bench_name_fmt.format(height=height, dbcache=cfg.bitcoind_dbcache),
-            command.total_secs,
-            command.memusage_kib,
-            executable='bitcoind',
-            extra_data={
-                'height': height,
-                'dbcache': cfg.bitcoind_dbcache,
-            },
-        )
+    checkpoints = list(
+        cfg.ibd_checkpoints_as_ints + (['tip'] if cfg.ibd_to_tip else []))
 
     # This might return None if we're IBDing from network.
     server_node = bitcoind.get_synced_node(cfg)
     client_node = bitcoind.Node(
         G_.workdir / 'bitcoin' / 'src' / 'bitcoind',
-        G_.workdir / 'bitcoin' / 'data',
+        G_.workdir / 'data',
+        copy_from_datadir=cfg.copy_from_datadir,
+        extra_args=cfg.client_bitcoind_args,
     )
-    # TODO don't do if passed in a datadir
-    client_node.empty_datadir()
+
+    if not cfg.copy_from_datadir:
+        client_node.empty_datadir()
 
     client_start_kwargs = {
-        'txindex': 1,
+        'txindex': 0 if '-prune' in cfg.client_bitcoind_args else 1,
         'listen': 0,
         'connect': 1 if cfg.ibd_from_network else 0,
         'addnode': '' if cfg.ibd_from_network else cfg.ibd_peer_address,
@@ -213,6 +228,25 @@ def bench_ibd(cfg):
     failure_count = 0
     last_height_seen = starting_height
     next_checkpoint = checkpoints.pop(0) if checkpoints else None
+
+    def report_ibd_result(command, height):
+        # Report to codespeed for this blockheight checkpoint
+        results.save_result(
+            G_.gitco,
+            bench_name_fmt.format(
+                start_height=starting_height,
+                height=height,
+                dbcache=cfg.bitcoind_dbcache),
+            command.total_secs,
+            command.memusage_kib(),
+            executable='bitcoind',
+            extra_data={
+                'txindex': client_start_kwargs['txindex'],
+                'start_height': starting_height,
+                'height': height,
+                'dbcache': cfg.bitcoind_dbcache,
+            },
+        )
 
     # Poll the running bitcoind process for its current height and report
     # results whenever we've crossed one of the user-specific checkpoints.
@@ -269,7 +303,7 @@ def bench_ibd(cfg):
 def bench_reindex(cfg):
     node = bitcoind.Node(
         G_.workdir / 'bitcoin' / 'src' / 'bitcoind',
-        G_.workdir / 'bitcoin' / 'data',
+        G_.workdir / 'data',
     )
 
     checkpoints = list(sorted(
@@ -287,7 +321,7 @@ def bench_reindex(cfg):
             G_.gitco,
             bench_name,
             node.cmd.total_secs,
-            node.cmd.memusage_kib,
+            node.cmd.memusage_kib(),
             executable='bitcoind',
             extra_data={
                 'height': height,
@@ -316,7 +350,7 @@ def _try_execute_and_report(
             return False
 
     results.save_result(
-        G_.gitco, bench_name, cmd.total_secs, cmd.memusage_kib, executable)
+        G_.gitco, bench_name, cmd.total_secs, cmd.memusage_kib(), executable)
 
 
 def _log_bench_result(succeeded: bool, bench_name: str, cmd: sh.Command):
@@ -333,7 +367,7 @@ def _log_bench_result(succeeded: bool, bench_name: str, cmd: sh.Command):
             "with maximum resident set size %.3f MiB",
             bench_name, cmd.total_secs,
             datetime.timedelta(seconds=cmd.total_secs),
-            cmd.memusage_kib / 1024)
+            cmd.memusage_kib() / 1024)
 
 
 def _check_for_ibd_failure(cfg, node):

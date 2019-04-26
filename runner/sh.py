@@ -1,7 +1,11 @@
 import subprocess
 import logging
 import time
+import shutil
 import typing as t
+from pathlib import Path
+
+from psutil import Process
 
 
 logger = logging.getLogger('bitcoinperf')
@@ -13,41 +17,13 @@ def drop_caches():
     run("sudo /sbin/sysctl vm.drop_caches=3")
 
 
-def get_proc_peakmem_kib(
-        ps: t.Union[int, subprocess.Popen]) -> t.Optional[int]:
-    """
-    Returns the peak memory usage in Kibibytes for a running process
-    (according to /proc).
-
-    We use /usr/bin/time to do this when we can wait for a process to
-    terminate, but sometimes we need to take incremental measurements (e.g.
-    IBD).
-
-    """
-    pid = ps.pid if hasattr(ps, 'pid') else ps
-    ran = run("grep VmPeak /proc/{}/status".format(pid))
-
-    if ran[-1] != 0:
-        logger.error(
-            "Unable to get peak mem usage for running process %s", ps)
-        return None
-
-    stdout = ran[0].decode().split()
-
-    if stdout[-1] != 'kB':
-        logger.error(
-            "Expected mem size to be reported in kB, got %s (ps %s)",
-            stdout[-1], ps)
-        return None
-
-    try:
-        mem_kb = int(stdout[1])
-    except ValueError:
-        logger.error("Expected int for mem usage, got %r", stdout[1])
-        return None
-
-    # convert kB to KiB
-    return int(mem_kb * 0.976562)
+def rm(path: Path):
+    if path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
 
 
 def run(*args, check_returncode=True, **kwargs) -> (bytes, bytes, int):
@@ -88,7 +64,7 @@ class Command:
     def start(self):
         self.start_time = time.time()
         self.ps = popen('$(which time) -f %M ' + self.cmd)
-        logger.info("[%s] command '%s' starting", self.bench_name, self.cmd)
+        logger.debug("[%s] command '%s' starting", self.bench_name, self.cmd)
 
     def join(self):
         (self.stdout, self.stderr) = self.ps.communicate()
@@ -102,10 +78,9 @@ class Command:
     def returncode(self):
         return self.ps.returncode
 
-    @property
     def memusage_kib(self) -> int:
         if self.returncode is None:
-            return get_proc_peakmem_kib(self.ps)
+            return get_bitcoind_meminfo_kib(Process(self.ps.pid))
         return int(self.stderr.decode().strip().split('\n')[-1])
 
     def check_for_failure(self):
@@ -119,3 +94,21 @@ class Command:
             raise RuntimeError("can't check for failure before completion")
 
         return self.returncode != 0
+
+
+def get_bitcoind_meminfo_kib(ps: Process) -> int:
+    """
+    Process graph looks like this:
+
+        sh(327)───time(334)───bitcoind(335)
+    """
+    # Recurse into child processes if need be.
+    if ps.name() in ['sh', 'time']:
+        assert len(ps.children()) == 1
+        return get_bitcoind_meminfo_kib(ps.children()[0])
+
+    assert ps.name().startswith('bitcoin')
+
+    # First element of the `memory_info()` tuple is RSS in bytes.
+    # See https://psutil.readthedocs.io/en/latest/#psutil.Process.memory_info
+    return int(ps.memory_info()[0] / 1024)

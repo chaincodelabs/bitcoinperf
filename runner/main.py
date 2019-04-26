@@ -74,7 +74,6 @@ def run_benches(cfg):
         cfg.workdir or tempfile.mkdtemp(prefix=cfg.bench_prefix))
 
     benchmarks.bench_gitclone(cfg, G_.workdir / 'bitcoin')
-    os.chdir(str(G_.workdir / 'bitcoin'))
 
     for remote, commit in config.get_commits(cfg):
         if commit != 'HEAD':
@@ -115,7 +114,7 @@ def _try_acquire_lockfile():
 def _get_shutdown_handler(should_teardown: bool):
     def handler():
         for node in bitcoind.Node.all_instances:
-            if node.is_process_alive:
+            if node.ps and node.ps.returncode is None:
                 node.terminate()
                 node.join()
 
@@ -138,7 +137,7 @@ def _get_shutdown_handler(should_teardown: bool):
 
 def _stash_debug_file():
     # Move the debug.log file out into /tmp for diagnostics.
-    debug_file = G_.workdir / "bitcoin/data/debug.log"
+    debug_file = G_.workdir / "data/debug.log"
     if debug_file.is_file():
         # Overwrite the file so as not to fill up disk.
         debug_file.rename(Path("/tmp/bench-debug.log"))
@@ -147,11 +146,18 @@ def _stash_debug_file():
 def main():
     cfg = config.parse_args()
 
+    results.reporters.append(results.LogReporter())
+
     if cfg.codespeed_reporter:
         results.reporters.append(cfg.codespeed_reporter)
 
     if cfg.slack_client:
         slack.attach_slack_handler_to_logger(cfg.slack_client, logger)
+
+    cfg.build_cache_path = None
+    if cfg.use_build_cache:
+        cfg.build_cache_path = Path.home() / '.bitcoinperf'
+        cfg.build_cache_path.mkdir(exist_ok=True)
 
     atexit.register(_get_shutdown_handler(not cfg.no_teardown))
 
@@ -169,7 +175,9 @@ def main():
                 results.REF_TO_NAME_TO_TIME[G_.gitco.ref])
             print(timestr)
         else:
+            print(dict(results.REF_TO_NAME_TO_TIME))
             output.print_comparative_times_table(results.REF_TO_NAME_TO_TIME)
+            output.make_plots(G_.workdir.name, results.REF_TO_NAME_TO_TIME)
     except Exception:
         cfg.slack_client.send_to_slack_attachment(
             G_.gitco, "Error", {}, text=traceback.format_exc(), success=False)

@@ -10,7 +10,7 @@
 set -euo pipefail
 
 export IBD_PEER_ADDRESS=localhost
-export SYNCED_DATA_DIR=/data/bitcoin_bench
+export SYNCED_DATADIR=/data/bitcoin_bench
 export SYNCED_BITCOIN_REPO_DIR="${HOME}/src/bitcoin_bench"
 export CODESPEED_URL=http://localhost:8000
 export CODESPEED_USER=admin

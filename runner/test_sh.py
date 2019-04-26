@@ -6,13 +6,7 @@ import pytest
 from . import sh, config
 
 
-def test_get_peak_mem():
-    if Path("/proc").is_dir():
-        assert sh.get_proc_peakmem_kib(os.getpid()) is not None
-
-
 def test_run():
-    cfg = config.parse_args("")
     (stdout, stderr, code) = sh.run("ls -lah .")
 
     # returncode

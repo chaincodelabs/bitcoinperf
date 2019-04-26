@@ -7,7 +7,6 @@ services:
       context: .
       dockerfile: ./runner/Dockerfile
     environment:
-      - BITCOIND_STOPATHEIGHT=230000
       - IBD_PEER_ADDRESS=localhost
       - SYNCED_DATA_DIR=/bitcoin/data
       - SYNCED_BITCOIN_REPO_DIR=/bitcoin
