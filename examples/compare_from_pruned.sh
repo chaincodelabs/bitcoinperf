@@ -45,7 +45,7 @@ export CLIENT_BITCOIND_ARGS="-prune=1000000"
  
 # These are recognized bitcoinperf envvars (see runner/config.py).
 #
-export COMMITS="${BASE_BRANCH},${BRANCH_TO_BENCH}"
+export COMMITS="${BRANCH_TO_BENCH},${BASE_BRANCH}"
 export IBD_CHECKPOINTS="$(( PRUNED_STARTING_HEIGHT + HEIGHT_INCREASE ))"
 # Speed up build time
 export MAKE_JOBS="$(nproc --ignore=1)"

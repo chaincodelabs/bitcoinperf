@@ -53,7 +53,7 @@ def print_comparative_times_table(commits_to_benches, pfile=sys.stdout):
     commits = [i[0] for i in items]
     vs_str = ("{}" + (" vs. {}" * (len(commits) - 1))).format(*commits)
     writer.table_name = vs_str + " (absolute)"
-    writer.header_list = ["name", "iterations", *commits]
+    writer.header_list = ["bench name", "x", *commits]
     writer.value_matrix = []
     writer.margin = 1
     writer.stream = pfile
@@ -98,17 +98,30 @@ def make_plots(folder_prefix, commits_to_benches):
     # num_benches = len(items[0][1])
     benches_no_mem = [i for i in benches_sorted if 'mem-usage' not in i]
 
+    # Font size stuff lifted from https://stackoverflow.com/a/39566040
+    SMALL_SIZE = 8
+    MEDIUM_SIZE = 10
+    BIGGER_SIZE = 12
+
+    plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+    plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+    plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+    plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+    plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+    plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+
     for bench in benches_no_mem:
         plt.clf()
-        plt.xticks(rotation=90)
+        plt.rcParams.update({'font.family': 'monospace'})
         mem_bench = "{}.mem-usage".format(bench)
 
         if mem_bench not in benches_sorted:
             # TODO don't assume we have mem-usage available
             continue
 
-        f, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        f.set_size_inches(6, 8)
+        f, (ax1, ax2) = plt.subplots(1, 2)
+        f.set_size_inches(6, 3)
 
         data = [
             commits_to_benches[commit][bench] for commit in commits_sorted
