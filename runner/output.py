@@ -143,7 +143,7 @@ def make_plots(folder_prefix, commits_to_benches):
 
         ax2.boxplot(data)
         ax2.set_title('memory usage')
-        ax2.set_xticklabels(commits_sorted)
+        ax2.set_xticklabels([i[:22] for i in commits_sorted])
         ax2.set(ylabel='MB')
 
         plot_path = "{}/{}.png".format(output_path, bench)
