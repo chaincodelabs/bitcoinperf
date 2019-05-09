@@ -58,6 +58,16 @@ def _startup_assertions(cfg):
         raise RuntimeError(
             "Couldn't acquire lockfile %s; exiting", LOCKFILE_PATH)
 
+    synced_bitcoind_path = cfg.synced_bitcoin_repo_dir / 'src' / 'bitcoind'
+    if not (synced_bitcoind_path.is_file() and
+            os.access(synced_bitcoind_path, os.X_OK)):
+        raise RuntimeError("bitcoind executable missing at {}".format(
+            synced_bitcoind_path))
+
+    if not cfg.copy_from_datadir.is_dir():
+        raise RuntimeError("COPY_FROM_DATADIR doesn't exist ({})".format(
+            cfg.copy_from_datadir))
+
 
 def run_benches(cfg):
     """
