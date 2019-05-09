@@ -4,6 +4,7 @@ import os
 import sys
 import datetime
 import multiprocessing
+import re
 import typing as t
 from pathlib import Path
 
@@ -19,6 +20,18 @@ HOSTNAME = socket.gethostname()
 BENCH_NAMES = {
     'gitclone', 'build', 'makecheck', 'functionaltests',
     'microbench', 'ibd', 'reindex'}
+
+
+class Candidate(t.NamedTuple):
+    gitref: str
+    bitcoind_extra_args: t.Optional[str]
+
+    @property
+    def id(self):
+        return "{}-{}".format(
+            self.gitref,
+            re.sub('\s+', '', self.bitcoind_extra_args).replace('-', ''))
+
 
 
 def build_parser():

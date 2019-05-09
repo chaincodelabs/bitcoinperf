@@ -1,0 +1,49 @@
+---
+
+# Where various data output is dumped
+artifact_dir: /tmp/output
+
+# no_caution: true
+
+synced_peer:
+  datadir: /data/bitcoin_bench
+  repodir: ${HOME}/src/bitcoin_bench
+
+  # or, if over network
+  # 
+  # address: 
+
+benches:
+
+  unittests:
+
+  functests:
+
+  microbench:
+    # benches: this,that,theother
+    
+  ibd_from_network:
+    end_height: 522_000
+
+  ibd_from_local:
+    end_height: 522_000
+    stash_datadir: /tmp/datadir
+    
+  ibd_range:
+    start_height: 500_000
+    end_height: 505_000
+
+  reindex:
+    datadir: /tmp/datadir
+
+
+
+to_bench:
+
+  master:
+    bitcoind_extra_args: "-logthreadnames"
+
+  fad88bd6c9f85e6e7f8fb66a94aa75c67d26b7d8:
+    bitcoind_extra_args: "-logthreadnames"
+
+  MarcoFalke:1905-buildStackReuseNone:
