@@ -129,8 +129,8 @@ class Node:
 
         Returns block count.
         """
-        num_tries = 1000
-        sleep_time_secs = 0.1
+        num_tries = 600
+        sleep_time_secs = 1
         bitcoind_up = False
         block_count = None
 
@@ -161,7 +161,9 @@ class Node:
                     self.cmd.stdout))
 
         if not bitcoind_up:
-            raise RuntimeError("Couldn't bring node up: {}".format(self))
+            raise RuntimeError(
+                "Couldn't bring node up: {} with command {}".format(
+                    self, self.cmd.cmd))
 
         return block_count
 
