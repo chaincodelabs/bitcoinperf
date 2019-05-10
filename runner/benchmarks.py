@@ -1,13 +1,17 @@
+import abc
 import contextlib
 import os
 import time
 import datetime
 import shutil
+import typing as t
 from pathlib import Path
+
+from marshmallow import Schema, fields
 
 from . import bitcoind, results, sh
 from .logging import get_logger
-from .sh import run, popen
+from .sh import popen
 from .globals import G_
 
 logger = get_logger()
@@ -39,7 +43,7 @@ def benchmark(name):
                 if not cfg.no_caution:
                     sh.drop_caches()
 
-                for i in range(count):
+                for _ in range(count):
                     func(cfg, *args_, **kwargs)
 
         return inner
@@ -54,82 +58,133 @@ def timer(name: str):
         time.time() - start)
 
 
-@benchmark('gitclone')
-def bench_gitclone(cfg, to_path: Path):
-    run("git clone -b {} {} {}".format(
-        cfg.repo_branch, cfg.repo_location, to_path))
+class Benchmark(abc.ABC):
+    name: str = ""
+    # The bench-specific config, set at runtime
+    bench_cfg: object = None
+    should_always_run: bool = False
 
-    # For all subsequent benchmarks, sit in the bitcoin/ dir.
-    os.chdir(G_.workdir / 'bitcoin')
+    def __init__(self, cfg: dict, run_idx: int = 0):
+        self.cfg = cfg
+        self.run_idx = run_idx
+        self.bench_cfg = cfg['benches'].get(self.name, {})
+        self.run_data = {}
+
+    @classmethod
+    def check_cfg(cls, cfg, bench_cfg) -> t.List[str]:
+        """Run at startup. Returns a list of errors."""
+
+    @abc.abstractmethod
+    def _run(self, cfg, bench_cfg):
+        pass
+
+    @property
+    @abc.abstractproperty
+    def id(self) -> t.Optional[str]:
+        """An identifier incorporating all the run parameters."""
+        return None
+
+    def wrapped_run(self, cfg, bench_cfg):
+        """Called externally."""
+        if not (cfg.no_caution or cfg.no_cache_drop):
+            sh.drop_caches()
+
+        logger.info("[%s] starting", self.id)
+        self._run(cfg, bench_cfg)
+        logger.info("[%s] done", self.id)
 
 
-@benchmark('build')
-def bench_build(cfg):
-    cache = cfg.build_cache_path / G_.gitco.sha
-    if cfg.use_build_cache and cache.exists():
-        logger.info(
-            "Cached version of build %s found - "
-            "restoring from that and skipping build ", G_.gitco.sha)
-        os.chdir(G_.workdir)
-        if (G_.workdir / 'bitcoin').exists():
-            sh.rm(G_.workdir / 'bitcoin')
-        os.symlink(cache, G_.workdir / 'bitcoin')
+benchmarks: t.List[Benchmark] = []
+
+
+class GitClone(PrepBenchmark):
+    name = 'gitclone'
+    should_always_run = True
+
+    @property
+    def id(self):
+        return self.name
+
+    def _run(self, cfg, bench_cfg):
+        sh.run("git clone -b {} {} {}".format(
+            cfg.repo_branch, cfg.repo_location, G_.workdir / 'bitcoin'))
+
+        # For all subsequent benchmarks, sit in the bitcoin/ dir.
         os.chdir(G_.workdir / 'bitcoin')
 
-    if cfg.use_build_cache and cache.exists():
-        # We've restored from the cache in `bench_gitclone` above.
-        return
 
-    logger.info("Building db4")
-    run("./contrib/install_db4.sh .")
+class Build(PrepBenchmark):
+    name = 'build'
+    should_always_run = True
 
-    my_env = os.environ.copy()
-    my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % G_.workdir
+    @property
+    def id(self):
+        return self.name
 
-    run("./autogen.sh")
+    def _run(self, cfg, bench_cfg):
+        cache = cfg.build_cache_path / G_.gitco.sha
+        if cfg.use_build_cache and cache.exists():
+            logger.info(
+                "Cached version of build %s found - "
+                "restoring from that and skipping build ", G_.gitco.sha)
+            os.chdir(G_.workdir)
+            if (G_.workdir / 'bitcoin').exists():
+                sh.rm(G_.workdir / 'bitcoin')
+            os.symlink(cache, G_.workdir / 'bitcoin')
+            os.chdir(G_.workdir / 'bitcoin')
 
-    configure_prefix = ''
-    if G_.compiler == 'clang':
-        configure_prefix = 'CC=clang CXX=clang++ '
+            return
 
-    # Ensure build is clean.
-    makefile_path = G_.workdir / 'bitcoin' / 'Makefile'
-    if makefile_path.is_file() and not cfg.no_clean:
-        run('make distclean')
+        logger.info("Building db4")
+        sh.run("./contrib/install_db4.sh .")
 
-    boostflags = ''
-    armlib_path = '/usr/lib/arm-linux-gnueabihf/'
+        my_env = os.environ.copy()
+        my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % G_.workdir
 
-    if Path(armlib_path).is_dir():
-        # On some architectures we need to manually specify this,
-        # otherwise configuring with clang can fail.
-        boostflags = '--with-boost-libdir=%s' % armlib_path
+        sh.run("./autogen.sh")
 
-    logger.info("Running ./configure [...]")
-    run(
-        configure_prefix +
-        './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-        'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
-        # Ensure ccache is disabled so that subsequent make runs
-        # are timed accurately.
-        '--disable-ccache ' + boostflags,
-        env=my_env)
+        configure_prefix = ''
+        if G_.compiler == 'clang':
+            configure_prefix = 'CC=clang CXX=clang++ '
 
-    _try_execute_and_report(
-        Names.MAKE.format(
-            j=cfg.make_jobs, compiler=G_.compiler),
-        "make -j %s" % cfg.make_jobs,
-        executable='make')
+        # Ensure build is clean.
+        makefile_path = G_.workdir / 'bitcoin' / 'Makefile'
+        if makefile_path.is_file() and not cfg.no_clean:
+            sh.run('make distclean')
 
-    if cfg.use_build_cache:
-        logger.info("Copying build to cache %s", cache)
-        shutil.copytree(G_.workdir / 'bitcoin',  cache)
+        boostflags = ''
+        armlib_path = '/usr/lib/arm-linux-gnueabihf/'
+
+        if Path(armlib_path).is_dir():
+            # On some architectures we need to manually specify this,
+            # otherwise configuring with clang can fail.
+            boostflags = '--with-boost-libdir=%s' % armlib_path
+
+        logger.info("Running ./configure [...]")
+        sh.run(
+            configure_prefix +
+            './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
+            'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
+            # Ensure ccache is disabled so that subsequent make runs
+            # are timed accurately.
+            '--disable-ccache ' + boostflags,
+            env=my_env)
+
+        _try_execute_and_report(
+            Names.MAKE.format(
+                j=cfg.make_jobs, compiler=G_.compiler),
+            "make -j %s" % cfg.make_jobs,
+            executable='make')
+
+        if cfg.use_build_cache:
+            logger.info("Copying build to cache %s", cache)
+            shutil.copytree(G_.workdir / 'bitcoin', cache)
 
 
 @benchmark('makecheck')
 def bench_makecheck(cfg):
     _try_execute_and_report(
-        Names.MAKE_CHECK(
+        Names.MAKE_CHECK.format(
             compiler=G_.compiler, nproc=(cfg.nproc - 1)),
         "make -j %s check" % (cfg.nproc - 1),
         num_tries=3, executable='make')
@@ -168,10 +223,10 @@ def bench_microbench(cfg):
     for line in microbench_lines:
         # Line strucure is
         # "Benchmark, evals, iterations, total, min, max, median"
-        assert(len(line) == 7)
+        assert len(line) == 7
         (bench, median, max_, min_) = (
             line[0], float(line[-1]), float(line[-2]), float(line[-3]))
-        if not (max_ >= median >= min_):
+        if not max_ >= median >= min_:
             logger.warning(
                 "%s has weird results: %s, %s, %s" %
                 (bench, max_, median, min_))
@@ -314,7 +369,7 @@ def bench_reindex(cfg):
         height=checkpoints[-1], dbcache=cfg.bitcoind_dbcache)
     node.start(reindex=1)
     height = node.wait_for_init()
-    node.ps.join()
+    node.ps.wait()
 
     if not _check_for_ibd_failure(cfg, node):
         results.save_result(
@@ -351,6 +406,7 @@ def _try_execute_and_report(
 
     results.save_result(
         G_.gitco, bench_name, cmd.total_secs, cmd.memusage_kib(), executable)
+    return True
 
 
 def _log_bench_result(succeeded: bool, bench_name: str, cmd: sh.Command):

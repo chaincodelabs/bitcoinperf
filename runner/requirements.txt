@@ -3,3 +3,5 @@ pytablewriter
 psutil
 numpy
 matplotlib
+pyyaml
+marshmallow

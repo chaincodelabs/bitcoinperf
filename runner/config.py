@@ -5,8 +5,13 @@ import sys
 import datetime
 import multiprocessing
 import re
+import tempfile
 import typing as t
 from pathlib import Path
+
+from marshmallow import Schema, fields, validates_schema
+from marshmallow.exceptions import ValidationError
+import yaml
 
 from . import logging, results, slack
 
@@ -22,9 +27,139 @@ BENCH_NAMES = {
     'microbench', 'ibd', 'reindex'}
 
 
-class Candidate(t.NamedTuple):
-    gitref: str
-    bitcoind_extra_args: t.Optional[str]
+def is_datadir(path):
+    if not ((path / 'blocks').exists() and (path / 'chainstate').exists()):
+        raise ValidationError("path isn't a valid datadir")
+
+def path_exists(path):
+    if not path.exists():
+        raise ValidationError("path doesn't exist")
+
+
+def is_built_bitcoin(path):
+    if not ((path / 'src' / 'bitcoind').exists() and
+            (path / 'src' / 'bitcoind').exists()):
+        raise ValidationError("path doesn't have bitcoin binaries")
+
+
+def is_compiler(name):
+    if name not in ('gcc', 'clang'):
+        raise ValidationError("compiler not recognized")
+
+
+class NetworkAddr(t.NamedTuple):
+    host: str
+    port: int
+
+
+class NetworkAddrField(fields.Field):
+    def _deserialize(self, val, attr, data, **kwargs):
+        host, port = val.split(':')
+        return NetworkAddr(host, int(port))
+
+    def _serialize(self, val, attr, obj, **kwargs):
+        return "{}:{}".format(val.host, val.port)
+
+
+class PathField(fields.Field):
+    def _deserialize(self, val, attr, data, **kwargs):
+        return Path(os.path.expandvars(val))
+
+    def _serialize(self, val, attr, obj, **kwargs):
+        return str(val)
+
+
+class SyncedPeer(Schema):
+    datadir = PathField(required=False, validate=[path_exists, is_datadir])
+    repodir = PathField(required=False, validate=[path_exists, is_built_bitcoin])
+    # or
+    address = NetworkAddrField(required=False)
+
+
+    @validates_schema
+    def validate_either_or(self, data):
+        if not (set(data.keys()).issuperset({'datadir', 'repodir'}) or
+                'address' in data):
+            raise ValidationError("synced_peer config not valid")
+
+
+def create_workdir():
+    return tempfile.TemporaryDirectory(prefix='bitcoinperf')
+
+def get_envname():
+    return {
+        'bench-odroid-1': 'ccl-bench-odroid-1',
+        'bench-raspi-1': 'ccl-bench-raspi-1',
+        'bench-hdd-1': 'ccl-bench-hdd-1',
+        'bench-ssd-1': 'ccl-bench-ssd-1',
+    }.get(HOSTNAME, '')
+
+
+class Codespeed(Schema):
+    url = fields.Url()
+    username = fields.Str()
+    password = fields.Str()
+    envname = fields.Str(default=get_envname)
+
+
+class Slack(Schema):
+    webhook_url = fields.Url()
+
+
+class Bench(Schema):
+    enabled = fields.Boolean(default=True)
+    run_count = fields.Int(default=1)
+
+
+class BenchUnittests(Bench):
+    num_jobs = fields.Int(default=1)
+
+
+class BenchFunctests(Bench):
+    num_jobs = fields.Int(default=1)
+
+
+class BenchIbdFromNetwork(Bench):
+    start_height = fields.Int(default=0)
+    end_height = fields.Int(default=None)
+    time_heights = fields.List(fields.Int())
+
+
+class BenchIbdFromLocal(Bench):
+    start_height = fields.Int(default=0)
+    end_height = fields.Int(default=None)
+    time_heights = fields.List(fields.Int())
+
+
+class BenchIbdRangeFromLocal(Bench):
+    start_height = fields.Int(default=0)
+    end_height = fields.Int(default=None)
+    time_heights = fields.List(fields.Int())
+    src_datadir = PathField(required=True, validate=[path_exists, is_datadir])
+
+
+class BenchReindex(Bench):
+    src_datadir = PathField(validate=[path_exists, is_datadir])
+
+
+class BenchReindexChainstate(Bench):
+    src_datadir = PathField(validate=[path_exists, is_datadir])
+
+
+class Benches(Schema):
+    unittests = fields.Nested(BenchUnittests())
+    functests = fields.Nested(BenchFunctests())
+    ibd_from_network = fields.Nested(BenchIbdFromNetwork())
+    ibd_from_local = fields.Nested(BenchIbdFromLocal())
+    ibd_range_from_local = fields.Nested(BenchIbdRangeFromLocal())
+    reindex = fields.Nested(BenchReindex())
+    reindex_chainstate = fields.Nested(BenchReindexChainstate())
+
+
+class Target(t.NamedTuple):
+    gitref = fields.Str(required=True)
+    bitcoind_extra_args = fields.Str()
+    configure_args = fields.Str()
 
     @property
     def id(self):
@@ -32,6 +167,37 @@ class Candidate(t.NamedTuple):
             self.gitref,
             re.sub('\s+', '', self.bitcoind_extra_args).replace('-', ''))
 
+
+class Config(Schema):
+    workdir = PathField(default=create_workdir)
+    artifact_dir = PathField()
+    synced_peer = fields.Nested(SyncedPeer)
+    codespeed_url = fields.Url()
+    compilers = fields.List(fields.String(), validate=is_compiler)
+    slack_webhook_url = fields.Url()
+    log_level = fields.String(default='INFO')
+    nproc = fields.Int(default=min(4, int(multiprocessing.cpu_count())))
+    no_teardown = fields.Boolean(default=False)
+    no_caution = fields.Boolean(default=False)
+    no_clean = fields.Boolean(default=False)
+    cache_build = fields.Boolean(default=False)
+    codespeed = fields.Nested(Codespeed)
+    slack = fields.Nested(Slack)
+    benches = fields.Nested(Benches, required=True)
+    to_bench = fields.Dict(keys=fields.Str(), values=fields.Nested(Target), required=True)
+
+
+def load(content: str):
+    yam = yaml.load(content)
+    for target in yam['to_bench']:
+        if not yam['to_bench'][target]:
+            yam['to_bench'][target] = {}
+        yam['to_bench'][target]['gitref'] = target
+
+    import pprint; pprint.pprint(yam)
+
+    ns = Namespace()
+    return Config().load(yam).data
 
 
 def build_parser():
@@ -72,10 +238,6 @@ def build_parser():
             name, num = i.split(':')
             out[name] = int(num)
         return out
-
-    addarg('REPO_LOCATION', 'https://github.com/bitcoin/bitcoin.git')
-
-    addarg('REPO_BRANCH', 'master', 'The branch to test')
 
     addarg('WORKDIR', '',
            'Path to where the temporary bitcoin clone will be checked out')

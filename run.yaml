@@ -3,38 +3,45 @@
 # Where various data output is dumped
 artifact_dir: /tmp/output
 
-# no_caution: true
+# Cache a built bitcoin src directory and restore it from the cache on
+# subsequent runs.
+cache_build: true
+
+# Set to true to disable cache dropping and various safety checks.
+no_caution: false
 
 synced_peer:
   datadir: /data/bitcoin_bench
   repodir: ${HOME}/src/bitcoin_bench
 
   # or, if over network
-  # 
-  # address: 
+  #
+  # address:
 
 benches:
 
   unittests:
+    enabled: true
 
   functests:
+    enabled: false
 
   microbench:
     # benches: this,that,theother
-    
+
   ibd_from_network:
     end_height: 522_000
 
   ibd_from_local:
     end_height: 522_000
     stash_datadir: /tmp/datadir
-    
-  ibd_range:
+
+  ibd_range_from_local:
     start_height: 500_000
     end_height: 505_000
 
   reindex:
-    datadir: /tmp/datadir
+    src_datadir: /tmp/datadir
 
 
 
