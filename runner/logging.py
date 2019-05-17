@@ -3,17 +3,18 @@ import logging.handlers
 import sys
 
 
-def configure_logger(log_level='INFO'):
+def configure_logger(cfg: 'Config', log_level: str = 'INFO'):
     logger = get_logger()
     sh = logging.StreamHandler(sys.stdout)
-    log_fmt = '%(asctime)s %(name)s [%(levelname)s] %(message)s'
+    sh_log_fmt = '%(asctime)s [%(levelname)s] %(message)s'
     sh.setLevel(log_level)
-    sh.setFormatter(logging.Formatter(log_fmt))
+    sh.setFormatter(logging.Formatter(sh_log_fmt))
 
-    filehandler = logging.handlers.TimedRotatingFileHandler(
-        "bitcoinperf.log", when='D', interval=2)
+    # Always log debug out to a file in the workdir
+    filehandler = logging.handlers.FileHandler(cfg.workdir / "bitcoinperf.log")
     filehandler.setLevel(logging.DEBUG)
-    filehandler.setFormatter(logging.Formatter(log_fmt))
+    file_log_fmt = '%(asctime)s %(name)s [%(levelname)s] %(message)s'
+    filehandler.setFormatter(logging.Formatter(file_log_fmt))
 
     logger.addHandler(sh)
     logger.addHandler(filehandler)

@@ -4,4 +4,4 @@ psutil
 numpy
 matplotlib
 pyyaml
-marshmallow
+pydantic

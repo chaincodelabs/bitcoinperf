@@ -48,6 +48,21 @@ def popen(args, env=None):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
 
 
+class ResourceUsage(t.NamedTuple):
+    # See https://psutil.readthedocs.io/en/latest/#psutil.Process.cpu_percent
+    cpu_percent: float
+
+    # See https://psutil.readthedocs.io/en/latest/#psutil.Process.memory_info
+    memory_info: tuple
+
+    # The number of file descriptors currently opened by this process.
+    num_fds: int
+
+    @property
+    def rss_kb(self) -> int:
+        return int(self.memory_info[0] / 1024)
+
+
 class Command:
     """
     Manages the running of a subprocess for a certain benchmark.
@@ -80,7 +95,7 @@ class Command:
 
     def memusage_kib(self) -> int:
         if self.returncode is None:
-            return get_bitcoind_meminfo_kib(Process(self.ps.pid))
+            return self.get_resource_usage().rss_kb
         return int(self.stderr.decode().strip().split('\n')[-1])
 
     def check_for_failure(self):
@@ -95,20 +110,34 @@ class Command:
 
         return self.returncode != 0
 
+    def get_resource_usage(self) -> ResourceUsage:
+        """
+        Return various resource usage statistics about the running process.
+        """
+        assert not self.returncode, "Can't collect data on stopped process"
 
-def get_bitcoind_meminfo_kib(ps: Process) -> int:
-    """
-    Process graph looks like this:
+        proc = Process(self.ps.pid)
 
-        sh(327)───time(334)───bitcoind(335)
-    """
-    # Recurse into child processes if need be.
-    if ps.name() in ['sh', 'time']:
-        assert len(ps.children()) == 1
-        return get_bitcoind_meminfo_kib(ps.children()[0])
+        if 'bitcoind' in self.cmd:
+            def find_process(proc_):
+                """
+                Process graph looks like this:
 
-    assert ps.name().startswith('bitcoin')
+                    sh(327)───time(334)───bitcoind(335)
+                """
+                # Recurse into child processes if need be.
+                if proc_.name() in ['sh', 'time']:
+                    assert len(proc_.children()) == 1
+                    return find_process(proc_.children()[0])
 
-    # First element of the `memory_info()` tuple is RSS in bytes.
-    # See https://psutil.readthedocs.io/en/latest/#psutil.Process.memory_info
-    return int(ps.memory_info()[0] / 1024)
+                assert proc_.name().startswith('bitcoin')
+                return proc_
+
+            proc = find_process(proc)
+
+        with proc.oneshot():
+            return ResourceUsage(
+                cpu_percent=proc.cpu_percent(),
+                memory_info=proc.memory_info(),
+                num_fds=proc.num_fds(),
+            )

@@ -7,19 +7,23 @@ import multiprocessing
 import re
 import tempfile
 import typing as t
+from argparse import Namespace
+from enum import Enum
 from pathlib import Path
 
-from marshmallow import Schema, fields, validates_schema
-from marshmallow.exceptions import ValidationError
-import yaml
+from pydantic import BaseModel, validator, UrlStr, PositiveInt
 
-from . import logging, results, slack
+from . import logging, slack
 
 logger = logging.get_logger()
+
+t.Op = t.Optional
 
 # Get physical memory specs
 MEM_GIB = (
     os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024. ** 3))
+
+DEFAULT_NPROC = min(4, int(multiprocessing.cpu_count()))
 
 HOSTNAME = socket.gethostname()
 BENCH_NAMES = {
@@ -27,64 +31,95 @@ BENCH_NAMES = {
     'microbench', 'ibd', 'reindex'}
 
 
-def is_datadir(path):
+def is_valid_path(p: str):
+    return Path(os.path.expandvars(p))
+
+
+def is_datadir(path: Path):
     if not ((path / 'blocks').exists() and (path / 'chainstate').exists()):
-        raise ValidationError("path isn't a valid datadir")
+        raise ValueError("path isn't a valid datadir")
+    return path
 
-def path_exists(path):
+
+def path_exists(path: Path):
     if not path.exists():
-        raise ValidationError("path doesn't exist")
+        raise ValueError("path doesn't exist")
+    return path
 
 
-def is_built_bitcoin(path):
+def is_built_bitcoin(path: Path):
     if not ((path / 'src' / 'bitcoind').exists() and
             (path / 'src' / 'bitcoind').exists()):
-        raise ValidationError("path doesn't have bitcoin binaries")
+        raise ValueError("path doesn't have bitcoin binaries")
+    return path
 
 
 def is_compiler(name):
     if name not in ('gcc', 'clang'):
-        raise ValidationError("compiler not recognized")
+        raise ValueError("compiler not recognized")
+    return name
 
 
-class NetworkAddr(t.NamedTuple):
-    host: str
-    port: int
+def is_port_open(addr: str) -> bool:
+    hostname, port = addr, '8332'
+    if ':' in addr:
+        hostname, port = addr.split(':')
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect((hostname, int(port)))
+        s.shutdown(2)
+        return addr
+    except Exception:
+        raise ValueError("can't connect to node at {}".format(addr))
 
 
-class NetworkAddrField(fields.Field):
-    def _deserialize(self, val, attr, data, **kwargs):
-        host, port = val.split(':')
-        return NetworkAddr(host, int(port))
-
-    def _serialize(self, val, attr, obj, **kwargs):
-        return "{}:{}".format(val.host, val.port)
+class NodeAddr(str):
+    """An address:port string pointing to a running bitcoin node."""
+    @classmethod
+    def __get_validators__(cls) -> 'CallableGenerator':
+        yield is_port_open
 
 
-class PathField(fields.Field):
-    def _deserialize(self, val, attr, data, **kwargs):
-        return Path(os.path.expandvars(val))
+class ExistingDatadir(Path):
+    @classmethod
+    def __get_validators__(cls) -> 'CallableGenerator':
+        yield is_valid_path
+        yield path_exists
+        yield is_datadir
 
-    def _serialize(self, val, attr, obj, **kwargs):
-        return str(val)
+
+class BuiltRepoDir(Path):
+    @classmethod
+    def __get_validators__(cls) -> 'CallableGenerator':
+        yield is_valid_path
+        yield path_exists
+        yield is_built_bitcoin
 
 
-class SyncedPeer(Schema):
-    datadir = PathField(required=False, validate=[path_exists, is_datadir])
-    repodir = PathField(required=False, validate=[path_exists, is_built_bitcoin])
+def _create_workdir(p: Path):
+    return p or tempfile.TemporaryDirectory(prefix='bitcoinperf')
+
+
+class Workdir(Path):
+    @classmethod
+    def __get_validators__(cls) -> 'CallableGenerator':
+        yield is_valid_path
+        yield _create_workdir
+
+
+class SyncedPeer(BaseModel):
+    datadir: ExistingDatadir = ''
+    repodir: BuiltRepoDir = ''
     # or
-    address = NetworkAddrField(required=False)
+    address: NodeAddr = None
 
-
-    @validates_schema
+    # TODO actually use this
     def validate_either_or(self, data):
         if not (set(data.keys()).issuperset({'datadir', 'repodir'}) or
                 'address' in data):
-            raise ValidationError("synced_peer config not valid")
+            raise ValueError("synced_peer config not valid")
 
-
-def create_workdir():
-    return tempfile.TemporaryDirectory(prefix='bitcoinperf')
 
 def get_envname():
     return {
@@ -95,343 +130,161 @@ def get_envname():
     }.get(HOSTNAME, '')
 
 
-class Codespeed(Schema):
-    url = fields.Url()
-    username = fields.Str()
-    password = fields.Str()
-    envname = fields.Str(default=get_envname)
+class Codespeed(BaseModel):
+    url: UrlStr
+    username: str
+    password: str
+    envname: str = None
+
+    @validator('envname')
+    def infer_envname(cls, v):
+        return v or get_envname()
 
 
-class Slack(Schema):
-    webhook_url = fields.Url()
+class Slack(BaseModel):
+    webhook_url: UrlStr
 
 
-class Bench(Schema):
-    enabled = fields.Boolean(default=True)
-    run_count = fields.Int(default=1)
+class Bench(BaseModel):
+    enabled: bool = True
+    run_count: bool = 1
 
 
 class BenchUnittests(Bench):
-    num_jobs = fields.Int(default=1)
+    num_jobs: t.Op[PositiveInt] = DEFAULT_NPROC
 
 
 class BenchFunctests(Bench):
-    num_jobs = fields.Int(default=1)
+    num_jobs: t.Op[PositiveInt] = DEFAULT_NPROC
+
+
+class BenchMicrobench(Bench):
+    num_jobs: t.Op[PositiveInt] = DEFAULT_NPROC
 
 
 class BenchIbdFromNetwork(Bench):
-    start_height = fields.Int(default=0)
-    end_height = fields.Int(default=None)
-    time_heights = fields.List(fields.Int())
+    start_height: PositiveInt = 0
+    end_height: t.Op[PositiveInt] = None
+    time_heights: t.Op[t.List[PositiveInt]] = None
 
 
 class BenchIbdFromLocal(Bench):
-    start_height = fields.Int(default=0)
-    end_height = fields.Int(default=None)
-    time_heights = fields.List(fields.Int())
+    start_height: PositiveInt = 0
+    end_height: t.Op[PositiveInt] = None
+    time_heights: t.Op[t.List[PositiveInt]] = None
 
 
 class BenchIbdRangeFromLocal(Bench):
-    start_height = fields.Int(default=0)
-    end_height = fields.Int(default=None)
-    time_heights = fields.List(fields.Int())
-    src_datadir = PathField(required=True, validate=[path_exists, is_datadir])
+    src_datadir: ExistingDatadir
+    start_height: PositiveInt = 0
+    end_height: t.Op[PositiveInt]
+    time_heights: t.Op[t.List[PositiveInt]] = None
 
 
 class BenchReindex(Bench):
-    src_datadir = PathField(validate=[path_exists, is_datadir])
+    # If None, we'll use the resulting datadir from the previous benchmark.
+    src_datadir: t.Op[ExistingDatadir] = None
+    end_height: PositiveInt = None
 
 
 class BenchReindexChainstate(Bench):
-    src_datadir = PathField(validate=[path_exists, is_datadir])
+    # If None, we'll use the resulting datadir from the previous benchmark.
+    src_datadir: t.Op[ExistingDatadir] = None
+    end_height: PositiveInt = None
 
 
-class Benches(Schema):
-    unittests = fields.Nested(BenchUnittests())
-    functests = fields.Nested(BenchFunctests())
-    ibd_from_network = fields.Nested(BenchIbdFromNetwork())
-    ibd_from_local = fields.Nested(BenchIbdFromLocal())
-    ibd_range_from_local = fields.Nested(BenchIbdRangeFromLocal())
-    reindex = fields.Nested(BenchReindex())
-    reindex_chainstate = fields.Nested(BenchReindexChainstate())
+class Benches(BaseModel):
+    unittests: t.Op[BenchUnittests] = None
+    functests: t.Op[BenchFunctests] = None
+    microbench: t.Op[BenchMicrobench] = None
+    ibd_from_network: t.Op[BenchIbdFromNetwork] = None
+    ibd_from_local: t.Op[BenchIbdFromLocal] = None
+    ibd_range_from_local: t.Op[BenchIbdRangeFromLocal] = None
+    reindex: t.Op[BenchReindex] = None
+    reindex_chainstate: t.Op[BenchReindexChainstate] = None
 
 
-class Target(t.NamedTuple):
-    gitref = fields.Str(required=True)
-    bitcoind_extra_args = fields.Str()
-    configure_args = fields.Str()
+class Target(BaseModel):
+    gitref: str
+    gitremote: str = ""
+    bitcoind_extra_args: str = ""
+    configure_args: str = ""
 
     @property
     def id(self):
         return "{}-{}".format(
             self.gitref,
-            re.sub('\s+', '', self.bitcoind_extra_args).replace('-', ''))
-
-
-class Config(Schema):
-    workdir = PathField(default=create_workdir)
-    artifact_dir = PathField()
-    synced_peer = fields.Nested(SyncedPeer)
-    codespeed_url = fields.Url()
-    compilers = fields.List(fields.String(), validate=is_compiler)
-    slack_webhook_url = fields.Url()
-    log_level = fields.String(default='INFO')
-    nproc = fields.Int(default=min(4, int(multiprocessing.cpu_count())))
-    no_teardown = fields.Boolean(default=False)
-    no_caution = fields.Boolean(default=False)
-    no_clean = fields.Boolean(default=False)
-    cache_build = fields.Boolean(default=False)
-    codespeed = fields.Nested(Codespeed)
-    slack = fields.Nested(Slack)
-    benches = fields.Nested(Benches, required=True)
-    to_bench = fields.Dict(keys=fields.Str(), values=fields.Nested(Target), required=True)
-
-
-def load(content: str):
-    yam = yaml.load(content)
-    for target in yam['to_bench']:
-        if not yam['to_bench'][target]:
-            yam['to_bench'][target] = {}
-        yam['to_bench'][target]['gitref'] = target
-
-    import pprint; pprint.pprint(yam)
-
-    ns = Namespace()
-    return Config().load(yam).data
-
-
-def build_parser():
-    parser = argparse.ArgumentParser(description="""
-    Run a series of benchmarks against a particular Bitcoin Core revision.
-
-    See bin/run_bench for a sample invocation.
-
-    """)
-
-    def addarg(name, default, help='', *, type=str):
-        if not name.isupper() or '-' in name:
-            raise ValueError("Argument name should be passed in LIKE_THIS")
-
-        flag_name = name.lower().replace('_', '-')
-        default = os.environ.get(name, default)
-        if help and not help.endswith('.'):
-            help += '.'
-        parser.add_argument(
-            '--%s' % flag_name, default=default,
-            help='{} Default overriden by {} env var (default: {})'.format(
-                help, name, default), type=type)
-
-    def csv_type(s):
-        return s.split(',')
-
-    def path_type(p):
-        if not p:
-            return None
-        else:
-            return Path(p)
-
-    def name_to_count_type(s):
-        if not s:
-            return {}
-        out = {}
-        for i in s.split(','):
-            name, num = i.split(':')
-            out[name] = int(num)
-        return out
-
-    addarg('WORKDIR', '',
-           'Path to where the temporary bitcoin clone will be checked out')
+            re.sub(r'\s+', '', self.bitcoind_extra_args).replace('-', ''))
 
-    addarg('IBD_PEER_ADDRESS', '',
-           'Network address to synced peer to IBD from. If left blank, '
-           'IBD will be done from the mainnet P2P network.')
-
-    addarg('SYNCED_DATADIR', '',
-           'When using a local IBD peer, specify a path to a datadir synced '
-           'to a chain high enough to do the requested IBD.',
-           type=path_type)
-
-    addarg('COPY_FROM_DATADIR', '',
-           'Initialize the downloading peer with a datadir from this path. '
-           'The datadir will be copied on disk. Useful for starting from a '
-           'non-trivial height using a pruned datadir.',
-           type=path_type)
-
-    addarg('SYNCED_BITCOIN_REPO_DIR', os.environ['HOME'] + '/bitcoin',
-           'Where the bitcoind binary which will serve blocks for IBD lives',
-           type=path_type)
 
-    addarg('CLIENT_BITCOIND_ARGS', '',
-           'Additional arguments to pass to the bitcoind invocation for '
-           'the downloading client node, e.g. "-prune=10000"')
-
-    addarg('SYNCED_BITCOIND_ARGS', '',
-           'Additional arguments to pass to the bitcoind invocation for '
-           'the synced IBD peer, e.g. -minimumchainwork')
+class Compilers(str, Enum):
+    clang = 'clang'
+    gcc = 'gcc'
 
-    addarg('SYNCED_BITCOIND_RPCPORT', '8332',
-           'The RPC port the synced node will respond on')
 
-    addarg('IBD_CHECKPOINTS',
-           '100_000,200_000,300_000,400_000,500_000,522_000,tip',
-           'Chain heights at which duration measurements will be reported '
-           'to codespeed. Can include underscores. E.g. 100_000,200_000')
+class Slack(BaseModel):
+    webhook_url: UrlStr = None
 
-    addarg('CODESPEED_URL', '')
+    def get_client(self):
+        return slack.Client(self.webhook_url)
 
-    addarg('SLACK_WEBHOOK_URL', '')
 
-    addarg(
-        'RUN_COUNTS', '',
-        help=(
-            "Specify the number of times a benchmark should be run, e.g. "
-            "'ibd:3,microbench:2'"),
-        type=name_to_count_type)
+class Config(BaseModel):
+    workdir: Workdir = ''
+    synced_peer: SyncedPeer
+    compilers: t.List[Compilers] = [Compilers.clang, Compilers.gcc]
+    slack: Slack = None
+    log_level: str = 'INFO'
+    num_build_jobs: PositiveInt = DEFAULT_NPROC
+    no_teardown: bool = False
+    no_caution: bool = False
+    no_clean: bool = False
+    no_cache_drop: bool = False
+    cache_build: bool = False
+    codespeed: Codespeed = None
+    benches: Benches
+    to_bench: t.List[Target]
 
-    addarg(
-        'BENCHES_TO_RUN', default=','.join(BENCH_NAMES),
-        help='Only run a subset of benchmarks',
-        type=csv_type)
-
-    addarg('COMPILERS', 'clang,gcc', type=csv_type)
-
-    addarg('MAKE_JOBS', '1', type=int)
+    def build_cache_path(self):
+        p = Path.home() / '.bitcoinperf' / 'build_cache'
+        p.mkdir(exist_ok=True, parents=True)
+        return p
 
-    addarg(
-        'COMMITS', '',
-        help=("The branches, tags, or commits to test, e.g. "
-              "'master,my_change'"),
-        type=csv_type)
-
-    addarg('BITCOIND_DBCACHE', '2048' if MEM_GIB > 3 else '512')
-
-    addarg('BITCOIND_ASSUMEVALID',
-           '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876',
-           help=('Should be set to a known block (e.g. the block hash of '
-                 'BITCOIND_STOPATHEIGHT) to make sure it is not set to a '
-                 'future block that we are not aware of'))
-
-    addarg('BITCOIND_PORT', '9003')
 
-    addarg('BITCOIND_RPCPORT', '9004')
-
-    addarg('LOG_LEVEL', 'INFO')
-
-    addarg('NPROC', min(4, int(multiprocessing.cpu_count())), type=int)
-
-    addarg('NO_TEARDOWN', False,
-           'If true, leave the Bitcoin checkout intact after finishing',
-           type=bool)
+# A container for global state that gets set at various points during
+# a benchmark run.
+G = Namespace()
 
-    addarg('NO_CAUTION', False,
-           "If true, don't perform a variety of startup checks and cache "
-           "drops",
-           type=bool)
+# The git checkout currently being benched.
+G.gitco: 'GitCheckout' = None
 
-    addarg('NO_CLEAN', False,
-           "If true, do not call `make distclean` before builds. Useful for "
-           "when you don't care about build times.", type=bool)
+# The compiler currently in use.
+G.compiler: Compilers = None
 
-    addarg('USE_BUILD_CACHE', False,
-           "If true, cache the builds per commit (useful for testing) under "
-           "~/.bitcoinperf",
-           type=bool)
+# The current benchmark being run.
+G.bench: 'Benchmark' = None
 
-    addarg('CODESPEED_USER', '')
+# The current benchmark being run.
+G.benchmark: 'Benchmark' = None
 
-    addarg('CODESPEED_PASSWORD', '')
+# Did we acquire the system-wide lockfile?
+G.lockfile_acquired: bool = False
 
-    addarg('CODESPEED_ENVNAME', {
-        'bench-odroid-1': 'ccl-bench-odroid-1',
-        'bench-raspi-1': 'ccl-bench-raspi-1',
-        'bench-hdd-1': 'ccl-bench-hdd-1',
-        'bench-ssd-1': 'ccl-bench-ssd-1',
-    }.get(HOSTNAME, ''))
+# The number of remaining run counts:
+# {
+#   ref1: {
+#     bench1: int, bench2: int, ...
+#   },
+#   ref2: { ...  }
+# }
+G.run_counts: t.Dict[GitCheckout, t.Dict['Benchmark', int]] = {}
 
-    return parser
+G.results: t.Dict[GitCheckout, t.Dict['Benchmark', dict]] = {}
 
 
-def parse_args(*args, **kwargs):
-    parser = build_parser()
-    args = parser.parse_args(*args, **kwargs)
-    args.benches_to_run = list(filter(None, args.benches_to_run))
-    args.compilers = list(sorted(args.compilers))
-
-    logging.configure_logger(args.log_level)
-    args.running_synced_bitcoind_locally = False
-
-    args.bench_prefix = (
-        "bench-%s-%s-" %
-        (args.repo_branch,
-         datetime.datetime.utcnow().strftime('%Y-%m-%d')))
-
-    # True when running an IBD from random peers on the network, i.e. a "real"
-    # IBD.
-    args.ibd_from_network = False
-
-    if args.ibd_peer_address in ('localhost', '127.0.0.1', '0.0.0.0'):
-        args.running_synced_bitcoind_locally = True
-        args.ibd_peer_address = '127.0.0.1'
-        logger.info(
-            "Running synced chain node on localhost "
-            "(no remote addr specified)")
-    elif not args.ibd_peer_address:
-        args.ibd_from_network = True
-        logger.info(
-            "Running a REAL IBD from the P2P network. "
-            "This may result in inconsistent IBD times.")
-
-    args.codespeed_reporter = None
-
-    if args.codespeed_url:
-        assert(args.codespeed_user)
-        assert(args.codespeed_password)
-        assert(args.codespeed_envname)
-        args.codespeed_report = results.CodespeedReporter(
-            args.codespeed_url,
-            args.codespeed_envname,
-            args.codespeed_user,
-            args.codespeed_password)
-
-    args.slack_client = slack.Client(args.slack_webhook_url)
-
-    for name in args.benches_to_run:
-        if name not in BENCH_NAMES:
-            print("Unrecognized bench name %r" % name)
-            sys.exit(1)
-
-    for comp in args.compilers:
-        if comp not in {'gcc', 'clang'}:
-            print("Unrecognized compiler name %r" % comp)
-            sys.exit(1)
-
-    args.ibd_checkpoints_as_ints = []
-
-    for checkpoint in args.ibd_checkpoints.split(','):
-        if checkpoint != 'tip':
-            args.ibd_checkpoints_as_ints.append(int(
-                checkpoint.replace("_", "")))
-
-    args.ibd_to_tip = 'tip' in args.ibd_checkpoints
-    args.last_ibd_checkpoint = (
-        args.ibd_checkpoints_as_ints[-1] if
-        args.ibd_checkpoints_as_ints else None)
-
-    return args
-
-
-def get_commits(cfg) -> t.List[t.Tuple[str, str]]:
-    cfg.commits = list(filter(None, cfg.commits))
-
-    if not cfg.commits:
-        return [('', 'HEAD')]
-    commits = []
-
-    for commit in cfg.commits:
-        # Allow users to specify commits in different remotes.
-        remote = ''
-        if ':' in commit:
-            remote, commit = commit.split(':')
-        commits.append((remote, commit))
-
-    return commits
+def populate_run_counts(cfg):
+    for target in cfg.to_bench:
+        counts = {}
+        for benchname, benchcfg in cfg.benches.items():
+            counts[benchname] = benchcfg.run_count
+        G.run_counts[target.gitref] = counts

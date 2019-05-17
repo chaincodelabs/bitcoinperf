@@ -20,11 +20,13 @@ synced_peer:
 
 benches:
 
-  unittests:
+  makecheck:
     enabled: true
+    num_jobs: 4
 
   functests:
     enabled: false
+    num_jobs: 4
 
   microbench:
     # benches: this,that,theother
@@ -39,18 +41,22 @@ benches:
   ibd_range_from_local:
     start_height: 500_000
     end_height: 505_000
+    src_datadir: /data/bitcoin_pruned_500k
 
   reindex:
-    src_datadir: /tmp/datadir
+    enabled: false
 
+  reindex_chainstate:
+    enabled: false
 
 
 to_bench:
 
-  master:
+  - gitref: master
     bitcoind_extra_args: "-logthreadnames"
 
-  fad88bd6c9f85e6e7f8fb66a94aa75c67d26b7d8:
+  - gitref: fad88bd6c9f85e6e7f8fb66a94aa75c67d26b7d8
     bitcoind_extra_args: "-logthreadnames"
 
-  MarcoFalke:1905-buildStackReuseNone:
+  - gitref: 1905-buildStackReuseNone
+    gitremote: MarcoFalke

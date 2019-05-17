@@ -6,6 +6,8 @@ import subprocess
 import shutil
 from pathlib import Path
 
+from psutil import Process
+
 from . import sh, logging
 
 logger = logging.get_logger()
@@ -25,6 +27,9 @@ _BENCH_SPECIFIC_BITCOIND_ARGS = (
     # on machines with small memory, so only output to debug.log files in disk.
     '-printtoconsole=0 '
 )
+
+DEFAULT_ASSUMEVALID = (
+    '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876')
 
 
 class Node:
@@ -119,6 +124,28 @@ class Node:
         self.cmd.start()
         logger.info("starting node with datadir %s", self.datadir)
         logger.debug("command '%s' starting for %s", run_cmd, self)
+
+    def get_args_dict(self) -> dict:
+        """
+        Return the performance-relevant arguments this instance was started
+        with.
+        """
+        args = self.cmd.cmd.split('bitcoind')[-1].split()
+        args = [a.lstrip('-') for a in args]
+        d = {}
+        ignore_keys = [
+            'connect', 'addnode', 'rpcport', 'datadir', 'port']
+
+        for a in args:
+            if any(a.startswith(i) for i in ignore_keys):
+                continue
+            if '=' in args:
+                k, v = args.split('=')
+                d[k] = v
+            else:
+                d[a] = 1
+
+        return d
 
     def wait_for_init(self, require_height=None) -> int:
         """
@@ -232,6 +259,37 @@ class Node:
     def join(self):
         return self.cmd.join()
 
+    def poll_for_height_and_progress(self) -> \
+            t.Tuple[t.Optional[int], t.Optional[float]]:
+        """
+        Returns the current height and verification progress.
+
+        Returns nothing if the RPC command didn't respond successfully.
+        """
+        tries_left = 20
+        info = None
+
+        while tries_left > 0:
+            info = self.call_rpc("getblockchaininfo")
+
+            if not info:
+                tries_left -= 1
+                time.sleep(1)
+
+        if not info:
+            logger.error(
+                "Bitcoind hasn't responded to RPC in a suspiciously "
+                "long time... hung?")
+            return (None, None)
+
+        last_height_seen = info['blocks']
+        logger.debug("[%s] saw height %s", self, last_height_seen)
+
+        return (last_height_seen, info['verificationprogress'])
+
+    def get_resource_usage(self) -> sh.ResourceUsage:
+        return self.cmd.get_resource_usage()
+
 
 def _find_unused_port(startval=8888) -> int:
     """Return an unused port."""
@@ -252,14 +310,14 @@ def _find_unused_port(startval=8888) -> int:
     return portnum
 
 
-def get_synced_node(cfg) -> t.Optional[Node]:
+def get_synced_node(cfg, required_height: int) -> t.Optional[Node]:
     """
     Spawns a bitcoind instance that has a synced chain high enough to service
     an IBD up to the last checkpoint (`--ibd-checkpoints`).
 
     Must be cleaned up by the caller.
     """
-    if not cfg.running_synced_bitcoind_locally:
+    if cfg.synced_peer.address:
         # If we're not running a node locally, don't worry about setup and
         # teardown.
         return None
@@ -270,7 +328,7 @@ def get_synced_node(cfg) -> t.Optional[Node]:
         extra_args=cfg.synced_bitcoind_args,
     )
     server.start(connect=0, listen=1)
-    server.wait_for_init(require_height=cfg.last_ibd_checkpoint)
+    server.wait_for_init(require_height=required_height)
     logger.info("synced node is active (pid %s)", server.ps.pid)
 
     return server

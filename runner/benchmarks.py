@@ -1,18 +1,18 @@
 import abc
-import contextlib
+import copy
 import os
 import time
 import datetime
 import shutil
+import glob
 import typing as t
 from pathlib import Path
+from dataclasses import dataclass, field
 
-from marshmallow import Schema, fields
-
-from . import bitcoind, results, sh
+from . import bitcoind, results, sh, config, results
+from .config import G
 from .logging import get_logger
 from .sh import popen
-from .globals import G_
 
 logger = get_logger()
 
@@ -22,72 +22,43 @@ class Names:
     IBD_LOCAL        = 'ibd.local.{height}.dbcache={dbcache}'
     IBD_LOCAL_RANGE  = 'ibd.local.{start_height}.{height}.dbcache={dbcache}'
     REINDEX          = 'reindex.{height}.dbcache={dbcache}'
-    MICRO            = 'micro.{compiler}.{bench}'
-    FUNC_TESTS       = 'functionaltests.{compiler}'
-    MAKE_CHECK       = 'makecheck.{compiler}.{nproc}'
-    MAKE             = 'build.make.{j}.{compiler}'
-
-
-def benchmark(name):
-    """A decorator used to declare benchmark steps.
-
-    Handles skipping and count-based execution."""
-    def wrapper(func):
-        def inner(cfg, *args_, **kwargs):
-            if name not in cfg.benches_to_run:
-                logger.debug("Skipping benchmark %r", name)
-            else:
-                count = cfg.run_counts.get(name, 1)
-                logger.info("Running benchmark %r %d times", name, count)
-                # Drop system caches to ensure fair runs.
-                if not cfg.no_caution:
-                    sh.drop_caches()
-
-                for _ in range(count):
-                    func(cfg, *args_, **kwargs)
-
-        return inner
-    return wrapper
-
-
-@contextlib.contextmanager
-def timer(name: str):
-    start = time.time()
-    yield
-    results.REF_TO_NAME_TO_TIME[G_.gitco.ref][name].append(
-        time.time() - start)
 
 
 class Benchmark(abc.ABC):
     name: str = ""
-    # The bench-specific config, set at runtime
-    bench_cfg: object = None
-    should_always_run: bool = False
+    cfg_class: t.Type[config.Bench]
+    results_class: t.Type[results.Results]
 
     def __init__(self, cfg: dict, run_idx: int = 0):
         self.cfg = cfg
         self.run_idx = run_idx
-        self.bench_cfg = cfg['benches'].get(self.name, {})
-        self.run_data = {}
+        self.bench_cfg = getattr(cfg.benches, self.name, {})
+        self.compiler = copy.copy(G.compiler)
+        self.gitco = copy.copy(G.gitco)
+        self.id: str = self.id_format.format(
+            cfg=cfg, G=G, bench_cfg=self.bench_cfg)
 
-    @classmethod
-    def check_cfg(cls, cfg, bench_cfg) -> t.List[str]:
-        """Run at startup. Returns a list of errors."""
-
-    @abc.abstractmethod
-    def _run(self, cfg, bench_cfg):
-        pass
+        # Each subclass must define a Results class, which defines the schema
+        # of result data that the bench run will yield.
+        self.results = self.results_class()
 
     @property
     @abc.abstractproperty
-    def id(self) -> t.Optional[str]:
+    def id_format(self) -> str:
         """An identifier incorporating all the run parameters."""
-        return None
+        return ""
+
+    @abc.abstractmethod
+    def _run(self, cfg, bench_cfg):
+        """Run the actual benchmark."""
+        pass
 
     def wrapped_run(self, cfg, bench_cfg):
         """Called externally."""
         if not (cfg.no_caution or cfg.no_cache_drop):
             sh.drop_caches()
+
+        G.benchmark = self.__class__
 
         logger.info("[%s] starting", self.id)
         self._run(cfg, bench_cfg)
@@ -97,58 +68,29 @@ class Benchmark(abc.ABC):
 benchmarks: t.List[Benchmark] = []
 
 
-class GitClone(PrepBenchmark):
-    name = 'gitclone'
-    should_always_run = True
-
-    @property
-    def id(self):
-        return self.name
-
-    def _run(self, cfg, bench_cfg):
-        sh.run("git clone -b {} {} {}".format(
-            cfg.repo_branch, cfg.repo_location, G_.workdir / 'bitcoin'))
-
-        # For all subsequent benchmarks, sit in the bitcoin/ dir.
-        os.chdir(G_.workdir / 'bitcoin')
-
-
-class Build(PrepBenchmark):
+class Build(Benchmark):
     name = 'build'
-    should_always_run = True
-
-    @property
-    def id(self):
-        return self.name
+    id_format = 'build.make.{cfg.num_build_jobs}.{G.compiler}'
 
     def _run(self, cfg, bench_cfg):
-        cache = cfg.build_cache_path / G_.gitco.sha
-        if cfg.use_build_cache and cache.exists():
-            logger.info(
-                "Cached version of build %s found - "
-                "restoring from that and skipping build ", G_.gitco.sha)
-            os.chdir(G_.workdir)
-            if (G_.workdir / 'bitcoin').exists():
-                sh.rm(G_.workdir / 'bitcoin')
-            os.symlink(cache, G_.workdir / 'bitcoin')
-            os.chdir(G_.workdir / 'bitcoin')
-
+        self._clean_out_cache()
+        if self._restore_from_cache():
             return
 
         logger.info("Building db4")
         sh.run("./contrib/install_db4.sh .")
 
         my_env = os.environ.copy()
-        my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % G_.workdir
+        my_env['BDB_PREFIX'] = "%s/bitcoin/db4" % cfg.workdir
 
         sh.run("./autogen.sh")
 
         configure_prefix = ''
-        if G_.compiler == 'clang':
+        if G.compiler == 'clang':
             configure_prefix = 'CC=clang CXX=clang++ '
 
         # Ensure build is clean.
-        makefile_path = G_.workdir / 'bitcoin' / 'Makefile'
+        makefile_path = cfg.workdir / 'bitcoin' / 'Makefile'
         if makefile_path.is_file() and not cfg.no_clean:
             sh.run('make distclean')
 
@@ -172,186 +114,269 @@ class Build(PrepBenchmark):
 
         _try_execute_and_report(
             Names.MAKE.format(
-                j=cfg.make_jobs, compiler=G_.compiler),
+                j=cfg.make_jobs, compiler=G.compiler),
             "make -j %s" % cfg.make_jobs,
             executable='make')
 
         if cfg.use_build_cache:
+            cache = self.get_cache_path()
             logger.info("Copying build to cache %s", cache)
-            shutil.copytree(G_.workdir / 'bitcoin', cache)
+            shutil.copytree(cfg.workdir / 'bitcoin', cache)
+
+    def get_cache_path(self):
+        return (
+            self.cfg.build_cache_path() /
+            "{}-{}".format(
+                self.cfg.current_git_co.sha, self.cfg.current_compiler))
+
+    def _restore_from_cache(self, cfg) -> True:
+        cache = self.get_cache_path()
+        cache_bitcoind = cache / 'src' / 'bitcoind'
+        cache_bitcoincli = cache / 'src' / 'bitcoin-cli'
+
+        if cfg.use_build_cache and cache.exists():
+            if not (cache_bitcoind.exists() and cache_bitcoincli.exists()):
+                logger.warning(
+                    "Incomplete cache found at %s; rebuilding", cache)
+                sh.rm(cache)
+
+            logger.info(
+                "Cached version of build %s found - "
+                "restoring from that and skipping build ", G.gitco.sha)
+            os.chdir(cfg.workdir)
+            if (cfg.workdir / 'bitcoin').exists():
+                sh.rm(cfg.workdir / 'bitcoin')
+            os.symlink(cache, cfg.workdir / 'bitcoin')
+            os.chdir(cfg.workdir / 'bitcoin')
+
+            return True
+        return False
+
+    def _clean_out_cache(self, cfg):
+        cache = cfg.build_cache_path / G.gitco.sha
+        files_in_cache = glob.glob("{}/*".format(cache))
+        files_in_cache.sort(key=lambda x: os.path.getmtime(x))
+
+        for stale in files_in_cache[cfg.cache_build_size:]:
+            sh.rm(stale)
 
 
-@benchmark('makecheck')
-def bench_makecheck(cfg):
-    _try_execute_and_report(
-        Names.MAKE_CHECK.format(
-            compiler=G_.compiler, nproc=(cfg.nproc - 1)),
-        "make -j %s check" % (cfg.nproc - 1),
-        num_tries=3, executable='make')
+benchmarks.append(Build)
 
 
-@benchmark('functionaltests')
-def bench_functests(cfg):
-    _try_execute_and_report(
-        Names.FUNC_TESTS.format(compiler=G_.compiler),
-        "./test/functional/test_runner.py",
-        num_tries=3, executable='functional-test-runner')
+class MakeCheck(Benchmark):
+    name = 'makecheck'
+    id_format = 'makecheck.{G.compiler}.j={bench_cfg.num_jobs}'
+
+    @dataclass
+    class Results:
+        total_time: int = None
+
+    def _run(self, cfg, bench_cfg):
+        _try_execute_and_report(
+            self.id,
+            "make -j %s check" % (cfg.nproc - 1),
+            num_tries=3, executable='make')
 
 
-@benchmark('microbench')
-def bench_microbench(cfg):
-    with timer("microbench.%s" % G_.compiler):
+benchmarks.append(MakeCheck)
+
+
+class FunctionalTests(Benchmark):
+    name = 'functionaltests'
+    id_format = 'functionaltests.{G.compiler}.j={bench_cfg.num_jobs}'
+
+    @dataclass
+    class Results:
+        total_time: int = None
+
+    def _run(self, cfg, bench_cfg):
+        _try_execute_and_report(
+            self.id,
+            "./test/functional/test_runner.py",
+            num_tries=3, executable='functional-test-runner')
+
+
+benchmarks.append(FunctionalTests)
+
+
+class Microbench(Benchmark):
+    name = 'microbench'
+    id_format = 'micro.{G.compiler}.j={bench_cfg.num_jobs}'
+
+    @dataclass
+    class Results:
+        total_time: int = None
+        bench_to_time: t.Dict[str, float] = field(default_factory=dict)
+
+    def _run(self, cfg, bench_cfg):
+        time_start = time.time()
         if not cfg.no_caution:
             sh.drop_caches()
         microbench_ps = popen("./src/bench/bench_bitcoin")
         (microbench_stdout,
          microbench_stderr) = microbench_ps.communicate()
+        self.results.total_time = (time.time() - time_start)
 
-    if microbench_ps.returncode != 0:
-        text = "stdout:\n%s\nstderr:\n%s" % (
-            microbench_stdout.decode(), microbench_stderr.decode())
+        if microbench_ps.returncode != 0:
+            text = "stdout:\n%s\nstderr:\n%s" % (
+                microbench_stdout.decode(), microbench_stderr.decode())
 
-        cfg.slack_client.send_to_slack_attachment(
-            G_.gitco, "Microbench exited with code %s" %
-            microbench_ps.returncode, {}, text=text, success=False)
+            cfg.slack_client.send_to_slack_attachment(
+                G.gitco, "Microbench exited with code %s" %
+                microbench_ps.returncode, {}, text=text, success=False)
 
-    microbench_lines = [
-        # Skip the first line (header)
-        i.decode().split(', ')
-        for i in microbench_stdout.splitlines()[1:]]
+        microbench_lines = [
+            # Skip the first line (header)
+            i.decode().split(', ')
+            for i in microbench_stdout.splitlines()[1:]]
 
-    for line in microbench_lines:
-        # Line strucure is
-        # "Benchmark, evals, iterations, total, min, max, median"
-        assert len(line) == 7
-        (bench, median, max_, min_) = (
-            line[0], float(line[-1]), float(line[-2]), float(line[-3]))
-        if not max_ >= median >= min_:
-            logger.warning(
-                "%s has weird results: %s, %s, %s" %
-                (bench, max_, median, min_))
-            assert False
-        results.save_result(
-            G_.gitco,
-            Names.MICRO.format(
-                compiler=G_.compiler, bench=bench),
-            total_secs=median,
-            memusage_kib=None,
-            executable='bench-bitcoin',
-            extra_data={'result_max': max_, 'result_min': min_})
+        for line in microbench_lines:
+            # Line strucure is
+            # "Benchmark, evals, iterations, total, min, max, median"
+            assert len(line) == 7
+            (bench, median, max_, min_) = (
+                line[0], float(line[-1]), float(line[-2]), float(line[-3]))
+            if not max_ >= median >= min_:
+                logger.warning(
+                    "%s has weird results: %s, %s, %s" %
+                    (bench, max_, median, min_))
+                assert False
+            results.save_result(
+                G.gitco,
+                'micro.{G.compiler}.{bench}'.format(G=G, bench=bench),
+                total_secs=median,
+                memusage_kib=None,
+                executable='bench-bitcoin',
+                extra_data={'result_max': max_, 'result_min': min_})
 
 
-@benchmark('ibd')
-def bench_ibd(cfg):
-    bench_name_fmt = (
-        Names.IBD_REAL if cfg.ibd_from_network else Names.IBD_LOCAL)
+benchmarks.append(Microbench)
 
-    if cfg.copy_from_datadir:
-        bench_name_fmt = Names.IBD_LOCAL_RANGE
 
-    checkpoints = list(
-        cfg.ibd_checkpoints_as_ints + (['tip'] if cfg.ibd_to_tip else []))
+class IbdBench(Bench):
+    name = 'ibd.real'
 
-    # This might return None if we're IBDing from network.
-    server_node = bitcoind.get_synced_node(cfg)
-    client_node = bitcoind.Node(
-        G_.workdir / 'bitcoin' / 'src' / 'bitcoind',
-        G_.workdir / 'data',
-        copy_from_datadir=cfg.copy_from_datadir,
-        extra_args=cfg.client_bitcoind_args,
-    )
+    @dataclass
+    class Results:
+        total_time: int = None
+        height_to_time: t.Dict[int, float] = field(default_factory=dict)
 
-    if not cfg.copy_from_datadir:
-        client_node.empty_datadir()
+    def _ibd_setup(self):
+        pass
+        if cfg.copy_from_datadir:
+            bench_name_fmt = Names.IBD_LOCAL_RANGE
 
-    client_start_kwargs = {
-        'txindex': 0 if '-prune' in cfg.client_bitcoind_args else 1,
-        'listen': 0,
-        'connect': 1 if cfg.ibd_from_network else 0,
-        'addnode': '' if cfg.ibd_from_network else cfg.ibd_peer_address,
-        'dbcache': cfg.bitcoind_dbcache,
-        'assumevalid': cfg.bitcoind_assumevalid,
-    }
+        checkpoints = list(
+            cfg.ibd_checkpoints_as_ints + (['tip'] if cfg.ibd_to_tip else []))
 
-    if server_node:
-        client_start_kwargs['addnode'] = '127.0.0.1:{}'.format(
-            server_node.port)
-
-    client_node.start(**client_start_kwargs)
-    starting_height = client_node.wait_for_init()
-
-    failure_count = 0
-    last_height_seen = starting_height
-    next_checkpoint = checkpoints.pop(0) if checkpoints else None
-
-    def report_ibd_result(command, height):
-        # Report to codespeed for this blockheight checkpoint
-        results.save_result(
-            G_.gitco,
-            bench_name_fmt.format(
-                start_height=starting_height,
-                height=height,
-                dbcache=cfg.bitcoind_dbcache),
-            command.total_secs,
-            command.memusage_kib(),
-            executable='bitcoind',
-            extra_data={
-                'txindex': client_start_kwargs['txindex'],
-                'start_height': starting_height,
-                'height': height,
-                'dbcache': cfg.bitcoind_dbcache,
-            },
+        # This might return None if we're IBDing from network.
+        server_node = bitcoind.get_synced_node(cfg)
+        client_node = bitcoind.Node(
+            G_.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            G_.workdir / 'data',
+            copy_from_datadir=cfg.copy_from_datadir,
+            extra_args=cfg.client_bitcoind_args,
         )
 
-    # Poll the running bitcoind process for its current height and report
-    # results whenever we've crossed one of the user-specific checkpoints.
-    #
-    while True:
-        info = client_node.call_rpc("getblockchaininfo")
+        if not cfg.copy_from_datadir:
+            client_node.empty_datadir()
 
-        if not info:
-            failure_count += 1
-            if failure_count > 20:
-                logger.error(
-                    "Bitcoind hasn't responded to RPC in a suspiciously "
-                    "long time... hung?")
-                break
-            time.sleep(1)
-            continue
+        client_start_kwargs = {
+            'txindex': 0 if '-prune' in cfg.client_bitcoind_args else 1,
+            'listen': 0,
+            'connect': 1 if cfg.ibd_from_network else 0,
+            'addnode': '' if cfg.ibd_from_network else cfg.ibd_peer_address,
+            'dbcache': cfg.bitcoind_dbcache,
+            'assumevalid': cfg.bitcoind_assumevalid,
+        }
 
-        last_height_seen = info['blocks']
-        logger.debug("Saw height %s", last_height_seen)
+        if server_node:
+            client_start_kwargs['addnode'] = '127.0.0.1:{}'.format(
+                server_node.port)
 
-        # If we have a next checkpoint, and it isn't just "sync to tip,"
-        # and we've passed it, then record results now.
-        #
-        if next_checkpoint and \
-                next_checkpoint != 'tip' and \
-                last_height_seen >= next_checkpoint:
+        client_node.start(**client_start_kwargs)
+
+    def _get_server_node(self) -> bitcoind.Node:
+        pass
+
+    def _get_client_node(self) -> bitcoind.Node:
+        pass
+
+    def _get_codespeed_bench_name(self) -> str:
+        return ""
+
+    def _run(self, cfg, bench_cfg):
+        self._ibd_setup()
+        server_node = self._get_server_node()
+        client_node = self._get_client_node()
+
+        starting_height = client_node.wait_for_init()
+        last_height_seen = starting_height
+        start_time = None
+
+        def report_ibd_result(command, height):
             # Report to codespeed for this blockheight checkpoint
-            report_ibd_result(client_node.cmd, next_checkpoint)
-            next_checkpoint = checkpoints.pop(0) if checkpoints else None
+            results.save_result(
+                G_.gitco,
+                bench_name_fmt.format(
+                    start_height=starting_height,
+                    height=height,
+                    dbcache=cfg.bitcoind_dbcache),
+                command.total_secs,
+                command.memusage_kib(),
+                executable='bitcoind',
+                extra_data={
+                    'txindex': client_start_kwargs['txindex'],
+                    'start_height': starting_height,
+                    'height': height,
+                    'dbcache': cfg.bitcoind_dbcache,
+                },
+            )
 
-            if not next_checkpoint:
-                logger.debug("Out of checkpoints - shutting down client")
+        # Poll the running bitcoind process for its current height and report
+        # results whenever we've crossed one of the user-specific checkpoints.
+        #
+        while True:
+            if client_node.ps.returncode is not None:
+                logger.info("node process died: %s", client_node)
                 break
 
-        if client_node.ps.returncode is not None or \
-                info["verificationprogress"] > 0.9999:
-            logger.debug("IBD complete or failed: %s", info)
-            break
+            (last_height_seen, progress) = (
+                client_node.poll_for_height_and_progress())
 
-        time.sleep(1)
+            if not (last_height_seen and progress):
+                raise RuntimeError(
+                    "RPC calls to {} failed".format(client_node))
+            elif last_height_seen >= bench_cfg.end_height or \
+                    progress > 0.9999:
+                logger.info("ending IBD based on height (%s) or progress (%s)",
+                            last_height_seen, progress)
+                break
+            elif last_height_seen < bench_cfg.start_height:
+                logger.debug("height (%s) not yet at min height %s",
+                            last_height_seen, bench_cfg.start_height)
+                time.sleep(0.5)
+                continue
 
-    client_node.stop_via_rpc()
-    client_node.join()
+            start_time = start_time or time.time()
+            report_ibd_result(client_node.cmd, next_checkpoint)
 
-    if not _check_for_ibd_failure(cfg, client_node):
-        for height in checkpoints:
-            report_ibd_result(client_node.cmd, height)
+            time.sleep(1)
 
-    server_node.stop_via_rpc()
-    server_node.join()
+        final_time = time.time() - start_time
+
+        if Reporters.codespeed and \
+                not _check_for_ibd_failure(cfg, client_node):
+            Reporters.codespeed.save_result(
+                self.gitco, self._get_codespeed_bench_name(),
+                final_time, executable='bitcoind',
+            )
+
+        client_node.stop_via_rpc()
+        server_node.stop_via_rpc()
+        client_node.join()
+        server_node.join()
 
 
 @benchmark('reindex')

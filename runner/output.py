@@ -88,11 +88,11 @@ def print_comparative_times_table(commits_to_benches, pfile=sys.stdout):
     writer.write_table()
 
 
-def make_plots(folder_prefix, commits_to_benches):
+def make_plots(cfg, commits_to_benches):
     """
     Generate matplotlib output based upon bench results.
     """
-    output_path = Path('/tmp/{}-plots'.format(folder_prefix))
+    output_path = cfg.workdir / 'plots'
     output_path.mkdir(exist_ok=True)
 
     items = list(sorted(commits_to_benches.items()))

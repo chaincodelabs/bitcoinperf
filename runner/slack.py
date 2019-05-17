@@ -18,7 +18,7 @@ class Client:
             self, gitco: GitCheckout, title, fields, text="", success=True):
         fields['Host'] = config.HOSTNAME
         fields['Commit'] = (gitco.sha or '')[:6]
-        fields['Branch'] = gitco.branch
+        fields['Ref'] = gitco.ref
 
         data = {
             "attachments": [{
@@ -52,8 +52,9 @@ class Client:
 
 
 class SlackLogHandler(logging.Handler):
-    def __init__(self, client: Client):
+    def __init__(self, cfg: 'config.Config', client: Client):
         self.client = client
+        self.cfg = cfg
         super().__init__()
 
     def emit(self, record):
@@ -63,7 +64,7 @@ class SlackLogHandler(logging.Handler):
         # the remainder as text.
         title, *rest = fmtd.split('\n', 1)
         return self.client.send_to_slack_attachment(
-            G_.gitco, title, {},
+            self.cfg.current_git_ref, title, {},
             text=(rest[0] if rest else None), success=False)
 
 

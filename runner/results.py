@@ -2,17 +2,45 @@ from collections import defaultdict
 
 import requests
 
+from .config import Target
 from .globals import GitCheckout
 from .logging import get_logger
 
 logger = get_logger()
 
 
-# TODO Actually, commit name -> {bench name -> measurement}.
-REF_TO_NAME_TO_TIME = defaultdict(lambda: defaultdict(list))
+class Reporters:
+    """A container for Reporter instances - to be populated in runner/main"""
+    codespeed = None
+    log = None
 
-# This should be populated with `Reporter` instances.
-reporters = []
+
+@dataclass
+class Results:
+    """
+    A container for results data. Paired with each Benchmark type in
+    `runner.benchmarks`.
+    """
+    total_time: int = None
+
+
+class HeightData(t.NamedTuple):
+    time_secs: float
+    rss_kb: int
+    cpu_percentage: float
+    num_fds: int
+
+
+@dataclass
+class IbdResults(Results):
+    height_to_data: t.Dict[int, HeightData]
+
+
+all_results: t.Dict[Target, t.Dict[t.Type['Benchmark'], t.List[Results]]] = {}
+
+
+def save_result(bench_instance):
+    pass
 
 
 def save_result(gitco: GitCheckout,
@@ -63,11 +91,11 @@ class LogReporter:
 
 class CodespeedReporter:
     """Report results to codespeed."""
-    def __init__(self, server_url, codespeed_envname, username, password):
-        self.server_url = server_url
-        self.codespeed_envname = codespeed_envname
-        self.username = username
-        self.password = password
+    def __init__(self, codespeed_cfg):
+        self.server_url = codespeed_cfg.url
+        self.codespeed_envname = codespeed_cfg.envname
+        self.username = codespeed_cfg.username
+        self.password = codespeed_cfg.password
 
     def save_result(self,
                     gitco: GitCheckout, benchmark_name, value, executable,
@@ -91,7 +119,7 @@ class CodespeedReporter:
         # Mandatory fields
         data = {
             'commitid': gitco.sha,
-            'branch': gitco.branch,
+            'branch': gitco.ref,
             'project': 'Bitcoin Core',
             'executable': executable,
             'benchmark': bench_name,
