@@ -22,6 +22,7 @@ class Results:
     `runner.benchmarks`.
     """
     total_time: int = None
+    peak_rss_kb: int = None
 
 
 class HeightData(t.NamedTuple):
@@ -36,11 +37,9 @@ class IbdResults(Results):
     height_to_data: t.Dict[int, HeightData] = field(default_factory=dict)
 
 
-all_results: t.Dict[Target, t.Dict[t.Type['Benchmark'], t.List[Results]]] = {}
-
-
-def save_result(bench_instance):
-    pass
+@dataclass
+class MicrobenchResults(Results):
+    bench_to_time: t.Dict[str, float] = field(default_factory=dict)
 
 
 def save_result(gitco: GitCheckout,
@@ -50,23 +49,21 @@ def save_result(gitco: GitCheckout,
                 executable: str,
                 extra_data: dict = None):
     """Save a result, forwarding it to all reporters."""
-    REF_TO_NAME_TO_TIME[gitco.ref][benchmark_name].append(total_secs)
-
-    for reporter in reporters:
+    for reporter in [Reporters.codespeed, Reporters.log]:
+        if not reporter:
+            continue
         try:
             reporter.save_result(
                 benchmark_name, total_secs, executable, extra_data)
         except Exception:
             logger.exception("failed to save result with %s", reporter)
 
-    # This may be called before the command has completed (in the case of
-    # incremental IBD reports), so only report memory usage if we have
-    # access to it.
-    if memusage_kib is not None:
-        mem_name = benchmark_name + '.mem-usage'
-        REF_TO_NAME_TO_TIME[gitco.ref][mem_name].append(memusage_kib)
+        # This may be called before the command has completed (in the case of
+        # incremental IBD reports), so only report memory usage if we have
+        # access to it.
+        if memusage_kib is not None:
+            mem_name = benchmark_name + '.mem-usage'
 
-        for reporter in reporters:
             reporter.save_result(
                 mem_name, memusage_kib, executable, extra_data,
                 units_title='Size', units='KiB')
@@ -78,15 +75,6 @@ class Reporter:
                     executable,
                     extra_data=None, units_title=None, units=None):
         pass
-
-
-class LogReporter:
-    """Log results."""
-    def save_result(self, *args, **kwargs):
-        resstr = "result: "
-        resstr += ",".join(str(i) for i in args)
-        resstr += ",".join(str(i) for i in kwargs.values())
-        logger.info(resstr)
 
 
 class CodespeedReporter:

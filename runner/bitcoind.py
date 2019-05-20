@@ -101,8 +101,14 @@ class Node:
             cmd += '-dbcache={} '.format(kwargs.pop('dbcache'))
         if 'txindex' in kwargs:
             cmd += '-txindex={} '.format(kwargs.pop('txindex'))
+
+        # Supply a default assumevalid value unless the user has overridden it
+        # at some point.
         if 'assumevalid' in kwargs:
             cmd += '-assumevalid={} '.format(kwargs.pop('assumevalid'))
+        elif 'assumevalid' not in self.extra_args:
+            cmd += '-assumevalid={} '.format(DEFAULT_ASSUMEVALID)
+
         if 'stopatheight' in kwargs:
             cmd += '-stopatheight={} '.format(kwargs.pop('stopatheight'))
         if 'listen' in kwargs:

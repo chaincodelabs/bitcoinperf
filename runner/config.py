@@ -32,6 +32,10 @@ def is_valid_path(p: str):
     return Path(os.path.expandvars(p))
 
 
+def is_writeable_path(p: str):
+    return os.access(Path(p).parent, os.W_OK)
+
+
 def is_datadir(path: Path):
     if not ((path / 'blocks').exists() and (path / 'chainstate').exists()):
         raise ValueError("path isn't a valid datadir")
@@ -92,6 +96,12 @@ class BuiltRepoDir(Path):
         yield is_valid_path
         yield path_exists
         yield is_built_bitcoin
+
+
+class WriteablePath(Path):
+    @classmethod
+    def __get_validators__(cls) -> 'CallableGenerator':
+        yield is_writeable_path
 
 
 def _create_workdir(p: Path):
@@ -163,12 +173,14 @@ class BenchIbdFromNetwork(Bench):
     start_height: PositiveInt = 0
     end_height: t.Op[PositiveInt] = None
     time_heights: t.Op[t.List[PositiveInt]] = None
+    stash_datadir: t.Op[WriteablePath] = None
 
 
 class BenchIbdFromLocal(Bench):
     start_height: PositiveInt = 0
     end_height: t.Op[PositiveInt] = None
     time_heights: t.Op[t.List[PositiveInt]] = None
+    stash_datadir: t.Op[WriteablePath] = None
 
 
 class BenchIbdRangeFromLocal(Bench):
@@ -183,6 +195,7 @@ class BenchReindex(Bench):
     src_datadir: t.Op[ExistingDatadir] = None
     end_height: PositiveInt = None
     time_heights: t.Op[t.List[PositiveInt]] = None
+    stash_datadir: t.Op[WriteablePath] = None
 
 
 class BenchReindexChainstate(Bench):
@@ -190,6 +203,7 @@ class BenchReindexChainstate(Bench):
     src_datadir: t.Op[ExistingDatadir] = None
     end_height: PositiveInt = None
     time_heights: t.Op[t.List[PositiveInt]] = None
+    stash_datadir: t.Op[WriteablePath] = None
 
 
 class Benches(BaseModel):

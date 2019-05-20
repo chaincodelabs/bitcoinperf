@@ -9,32 +9,30 @@ import typing as t
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from . import bitcoind, results, sh, config, results
+from . import bitcoind, results, sh, config
 from .globals import G
 from .logging import get_logger
 from .sh import popen
+from .results import HeightData
 
 logger = get_logger()
-
-
-class Names:
-    IBD_REAL         = 'ibd.real.{height}.dbcache={dbcache}'
-    IBD_LOCAL        = 'ibd.local.{height}.dbcache={dbcache}'
-    IBD_LOCAL_RANGE  = 'ibd.local.{start_height}.{height}.dbcache={dbcache}'
-    REINDEX          = 'reindex.{height}.dbcache={dbcache}'
 
 
 class Benchmark(abc.ABC):
     name: str = ""
     cfg_class: t.Type[config.Bench]
-    results_class: t.Type[results.Results]
+    results_class: t.Type[results.Results] = results.Results
 
-    def __init__(self, cfg: dict, run_idx: int = 0):
+    def __init__(self,
+                 cfg: dict,
+                 target: config.Target,
+                 run_idx: int = 0):
         self.cfg = cfg
         self.run_idx = run_idx
         self.bench_cfg = getattr(cfg.benches, self.name, {})
         self.compiler = copy.copy(G.compiler)
         self.gitco = copy.copy(G.gitco)
+        self.target = target
         self.id: str = self.id_format.format(
             cfg=cfg, G=G, bench_cfg=self.bench_cfg)
 
@@ -53,6 +51,10 @@ class Benchmark(abc.ABC):
         """Run the actual benchmark."""
         pass
 
+    def _teardown(self, cfg, bench_cfg):
+        """Any teardown that should always happen after the benchmark."""
+        pass
+
     def wrapped_run(self, cfg, bench_cfg):
         """Called externally."""
         if not (cfg.no_caution or cfg.no_cache_drop):
@@ -61,11 +63,39 @@ class Benchmark(abc.ABC):
         G.benchmark = self.__class__
 
         logger.info("[%s] starting", self.id)
-        self._run(cfg, bench_cfg)
+        try:
+            self._run(cfg, bench_cfg)
+        except Exception:
+            logger.info("[%s] failed with an exception", self.id)
+            raise
+        finally:
+            self._teardown()
+
         logger.info("[%s] done", self.id)
 
+    def _try_execute_and_report(
+            self, cmd, *, num_tries=1, executable='bitcoind'):
+        """
+        Attempt to execute some command a number of times and then report
+        its execution memory usage or execution time to codespeed over HTTP.
+        """
+        for i in range(num_tries):
+            cmd = sh.Command(cmd, self.name)
+            cmd.start()
+            cmd.join()
 
-benchmarks: t.List[Benchmark] = []
+            if not cmd.check_for_failure():
+                # Command succeeded
+                _log_bench_result(True, self.id, cmd)
+                self.results.total_time = cmd.total_secs
+                self.results.peak_rss_kb = cmd.memusage_kib()
+                results.save_result(
+                    G.gitco, self.name, cmd.total_secs, cmd.memusage_kib(),
+                    executable)
+                return True
+
+        _log_bench_result(False, self.id, cmd)
+        return False
 
 
 class Build(Benchmark):
@@ -112,25 +142,24 @@ class Build(Benchmark):
             '--disable-ccache ' + boostflags,
             env=my_env)
 
-        _try_execute_and_report(
-            Names.MAKE.format(
-                j=cfg.make_jobs, compiler=G.compiler),
+        self._try_execute_and_report(
+            self.id,
             "make -j %s" % cfg.make_jobs,
             executable='make')
 
         if cfg.use_build_cache:
-            cache = self.get_cache_path()
+            cache = self._get_cache_path()
             logger.info("Copying build to cache %s", cache)
             shutil.copytree(cfg.workdir / 'bitcoin', cache)
 
-    def get_cache_path(self):
+    def _get_cache_path(self):
         return (
             self.cfg.build_cache_path() /
             "{}-{}".format(
                 self.cfg.current_git_co.sha, self.cfg.current_compiler))
 
     def _restore_from_cache(self, cfg) -> True:
-        cache = self.get_cache_path()
+        cache = self._get_cache_path()
         cache_bitcoind = cache / 'src' / 'bitcoind'
         cache_bitcoincli = cache / 'src' / 'bitcoin-cli'
 
@@ -161,9 +190,6 @@ class Build(Benchmark):
             sh.rm(stale)
 
 
-benchmarks.append(Build)
-
-
 class MakeCheck(Benchmark):
     name = 'makecheck'
     id_format = 'makecheck.{G.compiler}.j={bench_cfg.num_jobs}'
@@ -173,13 +199,10 @@ class MakeCheck(Benchmark):
         total_time: int = None
 
     def _run(self, cfg, bench_cfg):
-        _try_execute_and_report(
+        self._try_execute_and_report(
             self.id,
             "make -j %s check" % (cfg.nproc - 1),
             num_tries=3, executable='make')
-
-
-benchmarks.append(MakeCheck)
 
 
 class FunctionalTests(Benchmark):
@@ -191,18 +214,16 @@ class FunctionalTests(Benchmark):
         total_time: int = None
 
     def _run(self, cfg, bench_cfg):
-        _try_execute_and_report(
+        self._try_execute_and_report(
             self.id,
             "./test/functional/test_runner.py",
             num_tries=3, executable='functional-test-runner')
 
 
-benchmarks.append(FunctionalTests)
-
-
 class Microbench(Benchmark):
     name = 'microbench'
     id_format = 'micro.{G.compiler}.j={bench_cfg.num_jobs}'
+    results_class = results.MicrobenchResults
 
     @dataclass
     class Results:
@@ -242,6 +263,7 @@ class Microbench(Benchmark):
                     "%s has weird results: %s, %s, %s" %
                     (bench, max_, median, min_))
                 assert False
+            self.results.bench_to_time[bench] = median
             results.save_result(
                 G.gitco,
                 'micro.{G.compiler}.{bench}'.format(G=G, bench=bench),
@@ -251,88 +273,46 @@ class Microbench(Benchmark):
                 extra_data={'result_max': max_, 'result_min': min_})
 
 
-benchmarks.append(Microbench)
+class IbdBench(abc.ABC, Benchmark):
+    name = 'ibd'
+    results_class = results.IbdResults
 
-
-class IbdBench(Bench):
-    name = 'ibd.real'
-
-    @dataclass
-    class Results:
-        total_time: int = None
-        height_to_time: t.Dict[int, float] = field(default_factory=dict)
-
-    def _ibd_setup(self):
-        pass
-        if cfg.copy_from_datadir:
-            bench_name_fmt = Names.IBD_LOCAL_RANGE
-
-        checkpoints = list(
-            cfg.ibd_checkpoints_as_ints + (['tip'] if cfg.ibd_to_tip else []))
-
+    def _get_server_node(self, cfg, bench_cfg) -> bitcoind.Node:
         # This might return None if we're IBDing from network.
-        server_node = bitcoind.get_synced_node(cfg)
-        client_node = bitcoind.Node(
-            G_.workdir / 'bitcoin' / 'src' / 'bitcoind',
-            G_.workdir / 'data',
-            copy_from_datadir=cfg.copy_from_datadir,
-            extra_args=cfg.client_bitcoind_args,
-        )
+        self.server_node = bitcoind.get_synced_node(cfg)
+        return self.server_node
 
-        if not cfg.copy_from_datadir:
-            client_node.empty_datadir()
-
-        client_start_kwargs = {
-            'txindex': 0 if '-prune' in cfg.client_bitcoind_args else 1,
-            'listen': 0,
-            'connect': 1 if cfg.ibd_from_network else 0,
-            'addnode': '' if cfg.ibd_from_network else cfg.ibd_peer_address,
-            'dbcache': cfg.bitcoind_dbcache,
-            'assumevalid': cfg.bitcoind_assumevalid,
-        }
-
-        if server_node:
-            client_start_kwargs['addnode'] = '127.0.0.1:{}'.format(
-                server_node.port)
-
-        client_node.start(**client_start_kwargs)
-
-    def _get_server_node(self) -> bitcoind.Node:
+    def _get_client_node(self, cfg, bench_cfg) -> bitcoind.Node:
         pass
 
-    def _get_client_node(self) -> bitcoind.Node:
-        pass
+    def _get_codespeed_bench_name(self, current_height) -> str:
+        if self.bench_cfg.start_height:
+            fmt = "{self.name}.{start_height}.{current_height}.dbcache={dbcache}"  # nopep8
+        else:
+            fmt = "{self.name}.{current_height}.dbcache={dbcache}"
 
-    def _get_codespeed_bench_name(self) -> str:
-        return ""
+        return fmt.format(
+            self=self,
+            current_height=current_height,
+            start_height=self.bench_cfg.start_height,
+            dbcache=self.client_node.get_args_dict()['dbcache'])
 
     def _run(self, cfg, bench_cfg):
         self._ibd_setup()
-        server_node = self._get_server_node()
-        client_node = self._get_client_node()
+        self.server_node = self._get_server_node()
+        self.client_node = client_node = self._get_client_node()
 
         starting_height = client_node.wait_for_init()
         last_height_seen = starting_height
+        last_resource_usage = None
         start_time = None
 
-        def report_ibd_result(command, height):
-            # Report to codespeed for this blockheight checkpoint
-            results.save_result(
-                G_.gitco,
-                bench_name_fmt.format(
-                    start_height=starting_height,
-                    height=height,
-                    dbcache=cfg.bitcoind_dbcache),
-                command.total_secs,
-                command.memusage_kib(),
-                executable='bitcoind',
-                extra_data={
-                    'txindex': client_start_kwargs['txindex'],
-                    'start_height': starting_height,
-                    'height': height,
-                    'dbcache': cfg.bitcoind_dbcache,
-                },
-            )
+        extra_data = {
+            'start_height': bench_cfg.start_height,
+            **client_node.get_args_dict()
+        }
+
+        report_to_codespeed_heights: t.List[int] = list(bench_cfg.time_heights)
 
         # Poll the running bitcoind process for its current height and report
         # results whenever we've crossed one of the user-specific checkpoints.
@@ -348,90 +328,228 @@ class IbdBench(Bench):
             if not (last_height_seen and progress):
                 raise RuntimeError(
                     "RPC calls to {} failed".format(client_node))
+
             elif last_height_seen >= bench_cfg.end_height or \
                     progress > 0.9999:
                 logger.info("ending IBD based on height (%s) or progress (%s)",
                             last_height_seen, progress)
                 break
+
             elif last_height_seen < bench_cfg.start_height:
                 logger.debug("height (%s) not yet at min height %s",
-                            last_height_seen, bench_cfg.start_height)
+                             last_height_seen, bench_cfg.start_height)
                 time.sleep(0.5)
                 continue
 
             start_time = start_time or time.time()
-            report_ibd_result(client_node.cmd, next_checkpoint)
+            time_now = time.time() - start_time
+            last_resource_usage = client_node.cmd.get_resource_usage()
+
+            # Codespeed
+            # -----------------------------------------------------------------
+            #
+            # Consume any heights which have been passed but not yet reported
+            # on.
+            while report_to_codespeed_heights and \
+                    report_to_codespeed_heights[0] <= last_height_seen:
+                report_at_height = report_to_codespeed_heights.pop(0)
+                results.save_result(
+                    self.gitco,
+                    self._get_codespeed_bench_name(last_height_seen),
+                    time_now,
+                    client_node.cmd.memusage_kib(),
+                    'bitcoind',
+                    extra_data={'height': last_height_seen, **extra_data},
+                )
+
+            # Results kept in-memory for later processing
+            # -----------------------------------------------------------------
+            self.results.height_to_data[last_height_seen] = HeightData(
+                time_now,
+                last_resource_usage.rss_kb,
+                last_resource_usage.cpu_percent,
+                last_resource_usage.num_fds,
+            )
 
             time.sleep(1)
 
         final_time = time.time() - start_time
+        final_name = self._get_codespeed_bench_name(last_height_seen)
 
-        if Reporters.codespeed and \
-                not _check_for_ibd_failure(cfg, client_node):
-            Reporters.codespeed.save_result(
-                self.gitco, self._get_codespeed_bench_name(),
-                final_time, executable='bitcoind',
-            )
-
-        client_node.stop_via_rpc()
-        server_node.stop_via_rpc()
-        client_node.join()
-        server_node.join()
-
-
-@benchmark('reindex')
-def bench_reindex(cfg):
-    node = bitcoind.Node(
-        G_.workdir / 'bitcoin' / 'src' / 'bitcoind',
-        G_.workdir / 'data',
-    )
-
-    checkpoints = list(sorted(
-        int(i) for i in cfg.ibd_checkpoints.replace("_", "").split(",")))
-    checkpoints = checkpoints or ['tip']
-
-    bench_name = Names.REINDEX.format(
-        height=checkpoints[-1], dbcache=cfg.bitcoind_dbcache)
-    node.start(reindex=1)
-    height = node.wait_for_init()
-    node.ps.wait()
-
-    if not _check_for_ibd_failure(cfg, node):
-        results.save_result(
-            G_.gitco,
-            bench_name,
-            node.cmd.total_secs,
-            node.cmd.memusage_kib(),
-            executable='bitcoind',
-            extra_data={
-                'height': height,
-                'dbcache': cfg.bitcoind_dbcache,
-            },
-        )
-
-
-def _try_execute_and_report(
-        bench_name, cmd, *, num_tries=1, executable='bitcoind'):
-    """
-    Attempt to execute some command a number of times and then report
-    its execution memory usage or execution time to codespeed over HTTP.
-    """
-    for i in range(num_tries):
-        cmd = sh.Command(cmd, bench_name)
-        cmd.start()
-        cmd.join()
-
-        if not cmd.check_for_failure():
-            _log_bench_result(True, bench_name, cmd)
-            # Command succeeded
-            break
-
-        if i == (num_tries - 1):
+        # Don't finalize results if the IBD was a failure.
+        #
+        if not _check_for_ibd_failure(cfg, client_node):
+            logger.info("IBD failed")
+            _log_bench_result(
+                False, final_name, self.client_node.cmd)
             return False
 
-    results.save_result(
-        G_.gitco, bench_name, cmd.total_secs, cmd.memusage_kib(), executable)
-    return True
+        _log_bench_result(
+            True, final_name, self.client_node.cmd)
+
+        # Mark measurements for all heights remaining.
+        #
+        while report_to_codespeed_heights and \
+                report_to_codespeed_heights[0] <= last_height_seen:
+            report_at_height = report_to_codespeed_heights.pop(0)
+            results.save_result(
+                self.gitco,
+                self._get_codespeed_bench_name(report_at_height),
+                time_now,
+                client_node.cmd.memusage_kib(),
+                'bitcoind',
+                extra_data={'height': last_height_seen, **extra_data},
+            )
+
+        # Record the time-to-tip if we didn't specify an end height.
+        #
+        if not bench_cfg.end_height:
+            results.save_result(
+                self.gitco,
+                self._get_codespeed_bench_name('tip'),
+                final_time,
+                client_node.cmd.memusage_kib(),
+                'bitcoind',
+                extra_data={'height': last_height_seen, **extra_data},
+            )
+
+        self.results.total_time = final_time
+        self.results.peak_rss_kb = self.client_node.cmd.memusage_kib()
+
+        if last_resource_usage:
+            self.results.height_to_data[last_height_seen] = HeightData(
+                final_time,
+                last_resource_usage.rss_kb,
+                last_resource_usage.cpu_percent,
+                last_resource_usage.num_fds,
+            )
+
+    def _teardown(self):
+        """
+        Shut down all the nodes we started and stash the datadir if need be.
+        """
+        self.client_node.stop_via_rpc()
+        if self.server_node:
+            self.server_node.stop_via_rpc()
+        self.client_node.join()
+        if self.server_node:
+            self.server_node.join()
+
+        if self.bench_cfg.stash_datadir:
+            shutil.move(G.workdir / 'data', self.bench_cfg.stash_datadir)
+            logger.info("Stashed datadir from %s -> %s",
+                        G.workdir / 'data',
+                        self.bench_cfg.stash_datadir)
+
+
+class IbdLocal(IbdBench):
+    name = 'ibd.local'
+
+    def _get_client_node(self, cfg, bench_cfg):
+        self.client_node = bitcoind.Node(
+            G.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            G.workdir / 'data',
+            extra_args=self.target.bitcoind_extra_args,
+        )
+
+        self.client_node.empty_datadir()
+
+        client_start_kwargs = {
+            'listen': 0,
+            'connect': 1 if cfg.ibd_from_network else 0,
+            'addnode': '' if cfg.ibd_from_network else cfg.ibd_peer_address,
+        }
+
+        if self.server_node:
+            client_start_kwargs['addnode'] = '127.0.0.1:{}'.format(
+                self.server_node.port)
+        else:
+            client_start_kwargs['addnode'] = cfg.synced_peer.address
+
+        self.client_node.start(**client_start_kwargs)
+        return self.client_node
+
+
+class IbdRangeLocal(IbdBench):
+    name = 'ibd.local'  # Range is reflected in starting height
+
+    def _get_client_node(self, cfg, bench_cfg):
+        self.client_node = bitcoind.Node(
+            G.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            G.workdir / 'data',
+            copy_from_datadir=bench_cfg.src_datadir,
+            extra_args=self.target.bitcoind_extra_args,
+        )
+
+        # Don't empty datadir since we just copied it from a pruned source.
+
+        client_start_kwargs = {
+            'listen': 0,
+            'connect': 0,
+            'addnode': cfg.ibd_peer_address,
+        }
+
+        if self.server_node:
+            client_start_kwargs['addnode'] = '127.0.0.1:{}'.format(
+                self.server_node.port)
+        else:
+            client_start_kwargs['addnode'] = cfg.synced_peer.address
+
+        self.client_node.start(**client_start_kwargs)
+        return self.client_node
+
+
+class IbdReal(IbdBench):
+    name = 'ibd.real'
+
+    def _get_client_node(self, cfg, bench_cfg):
+        self.client_node = bitcoind.Node(
+            G.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            G.workdir / 'data',
+            extra_args=self.target.bitcoind_extra_args,
+        )
+
+        self.client_node.empty_datadir()
+        self.client_node.start()
+        return self.client_node
+
+
+class Reindex(IbdBench):
+    name = 'reindex'
+
+    def _get_server_node(self, cfg, bench_cfg):
+        return None
+
+    def _get_client_node(self, cfg, bench_cfg):
+        self.client_node = bitcoind.Node(
+            G.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            bench_cfg.src_datadir,
+            extra_args=self.target.bitcoind_extra_args,
+        )
+
+        self.client_node.start(**{
+            'reindex': 1,
+        })
+        return self.client_node
+
+
+class ReindexChainstate(IbdBench):
+    name = 'reindex_chainstate'
+
+    def _get_server_node(self, cfg, bench_cfg):
+        return None
+
+    def _get_client_node(self, cfg, bench_cfg):
+        self.client_node = bitcoind.Node(
+            G.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            bench_cfg.src_datadir,
+            extra_args=self.target.bitcoind_extra_args,
+        )
+
+        self.client_node.start(**{
+            'reindex_chainstate': 1,
+        })
+        return self.client_node
 
 
 def _log_bench_result(succeeded: bool, bench_name: str, cmd: sh.Command):

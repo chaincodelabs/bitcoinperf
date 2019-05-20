@@ -82,19 +82,53 @@ def run_benches(cfg):
 
     _startup_assertions(cfg)
 
-    for target in config.to_bench:
-        cfg.current_git_co = git.checkout_in_dir(cfg.workdir / 'bitcoin')
-
-        # TODO: run counts
+    for target in cfg.to_bench:
+        G.gitco = git.checkout_in_dir(cfg.workdir / 'bitcoin')
 
         for compiler in cfg.compilers:
-            cfg.current_compiler = compiler
-            benchmarks.bench_build(cfg)
-            benchmarks.bench_makecheck(cfg)
-            benchmarks.bench_functests(cfg)
-            benchmarks.bench_microbench(cfg)
+            G.compiler = compiler
 
-        benchmarks.bench_ibd(cfg)
+            maybe_run_bench_some_times(
+                target, cfg,
+                cfg.benches.build, benchmarks.Build, always_run=True)
+
+            maybe_run_bench_some_times(
+                target, cfg, cfg.benches.unittests, benchmarks.MakeCheck)
+
+            maybe_run_bench_some_times(
+                target, cfg, cfg.benches.functests, benchmarks.FunctionalTests)
+
+            maybe_run_bench_some_times(
+                target, cfg, cfg.benches.microbench, benchmarks.Microbench)
+
+        # Only do the following for gcc (since they're expensive)
+
+        maybe_run_bench_some_times(
+            target, cfg, cfg.benches.ibd_from_network, benchmarks.IbdReal)
+
+        maybe_run_bench_some_times(
+            target, cfg, cfg.benches.ibd_from_local, benchmarks.IbdLocal)
+
+        maybe_run_bench_some_times(
+            target, cfg,
+            cfg.benches.ibd_range_from_local, benchmarks.IbdRangeLocal)
+
+        maybe_run_bench_some_times(
+            target, cfg, cfg.benches.reindex, benchmarks.Reindex)
+
+        maybe_run_bench_some_times(
+            target, cfg,
+            cfg.benches.reindex_chainstate, benchmarks.ReindexChainstate)
+
+
+def maybe_run_bench_some_times(
+        target, cfg, bench_cfg, bench_class, always_run=False):
+    if not bench_cfg and not always_run:
+        logger.info("[%s] skipping benchmark", bench_class.name)
+        return
+
+    for i in bench_cfg.run_count:
+        bench_class(cfg, bench_cfg, target, i)
 
 
 def _try_acquire_lockfile():
