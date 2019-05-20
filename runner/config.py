@@ -1,8 +1,5 @@
-import argparse
 import socket
 import os
-import sys
-import datetime
 import multiprocessing
 import re
 import tempfile
@@ -49,7 +46,7 @@ def path_exists(path: Path):
 
 def is_built_bitcoin(path: Path):
     if not ((path / 'src' / 'bitcoind').exists() and
-            (path / 'src' / 'bitcoind').exists()):
+            (path / 'src' / 'bitcoin-cli').exists()):
         raise ValueError("path doesn't have bitcoin binaries")
     return path
 
@@ -147,7 +144,7 @@ class Slack(BaseModel):
 
 class Bench(BaseModel):
     enabled: bool = True
-    run_count: bool = 1
+    run_count: PositiveInt = 1
 
 
 class BenchUnittests(Bench):
@@ -185,12 +182,14 @@ class BenchReindex(Bench):
     # If None, we'll use the resulting datadir from the previous benchmark.
     src_datadir: t.Op[ExistingDatadir] = None
     end_height: PositiveInt = None
+    time_heights: t.Op[t.List[PositiveInt]] = None
 
 
 class BenchReindexChainstate(Bench):
     # If None, we'll use the resulting datadir from the previous benchmark.
     src_datadir: t.Op[ExistingDatadir] = None
     end_height: PositiveInt = None
+    time_heights: t.Op[t.List[PositiveInt]] = None
 
 
 class Benches(BaseModel):
@@ -249,37 +248,6 @@ class Config(BaseModel):
         p = Path.home() / '.bitcoinperf' / 'build_cache'
         p.mkdir(exist_ok=True, parents=True)
         return p
-
-
-# A container for global state that gets set at various points during
-# a benchmark run.
-G = Namespace()
-
-# The git checkout currently being benched.
-G.gitco: 'GitCheckout' = None
-
-# The compiler currently in use.
-G.compiler: Compilers = None
-
-# The current benchmark being run.
-G.bench: 'Benchmark' = None
-
-# The current benchmark being run.
-G.benchmark: 'Benchmark' = None
-
-# Did we acquire the system-wide lockfile?
-G.lockfile_acquired: bool = False
-
-# The number of remaining run counts:
-# {
-#   ref1: {
-#     bench1: int, bench2: int, ...
-#   },
-#   ref2: { ...  }
-# }
-G.run_counts: t.Dict[GitCheckout, t.Dict['Benchmark', int]] = {}
-
-G.results: t.Dict[GitCheckout, t.Dict['Benchmark', dict]] = {}
 
 
 def populate_run_counts(cfg):

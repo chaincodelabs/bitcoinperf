@@ -10,7 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 from . import bitcoind, results, sh, config, results
-from .config import G
+from .globals import G
 from .logging import get_logger
 from .sh import popen
 

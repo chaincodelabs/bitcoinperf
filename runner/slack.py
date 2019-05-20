@@ -4,7 +4,8 @@ import logging
 import logging.handlers
 
 from . import config
-from .globals import G_, GitCheckout
+from .globals import G
+from .git import GitCheckout
 
 
 class Client:

@@ -1,9 +1,9 @@
-from collections import defaultdict
-
 import requests
+import typing as t
+from dataclasses import dataclass, field
 
 from .config import Target
-from .globals import GitCheckout
+from .git import GitCheckout
 from .logging import get_logger
 
 logger = get_logger()
@@ -33,7 +33,7 @@ class HeightData(t.NamedTuple):
 
 @dataclass
 class IbdResults(Results):
-    height_to_data: t.Dict[int, HeightData]
+    height_to_data: t.Dict[int, HeightData] = field(default_factory=dict)
 
 
 all_results: t.Dict[Target, t.Dict[t.Type['Benchmark'], t.List[Results]]] = {}

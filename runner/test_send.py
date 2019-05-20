@@ -1,5 +1,5 @@
 from . import config, results
-from .globals import GitCheckout
+from .git import GitCheckout
 
 
 def test_send_to_codespeed():

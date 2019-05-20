@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import (
     output, config, bitcoind, results, slack, benchmarks, logging, git)
-from .config import G
+from .globals import G
 from .logging import get_logger
 from .sh import run
 
