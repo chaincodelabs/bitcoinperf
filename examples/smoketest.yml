@@ -1,0 +1,97 @@
+---
+
+# Cache a built bitcoin src directory and restore it from the cache on
+# subsequent runs.
+cache_build: true
+
+# If true, the first git clone will be cached and copied from as necessary.
+cache_git: true
+
+# Set to true to disable cache dropping and various safety checks.
+no_caution: true
+
+
+compilers:
+  - gcc
+  - clang
+
+synced_peer:
+  datadir: /data/bitcoin_bench
+  repodir: /bitcoin
+  bitcoind_extra_args: ''
+
+  # or, if over network
+  #
+  # address:
+
+
+codespeed:
+  url: http://codespeed:8000
+  username: admin
+  password: "${CODESPEED_PASSWORD}"
+  envname: ccl-bench-hdd-1
+
+benches:
+  build:
+    num_jobs: 8
+
+  unittests:
+    enabled: true
+    num_jobs: 4
+
+  functests:
+    enabled: false
+    num_jobs: 4
+
+  microbench:
+    num_jobs: 4
+    filter: SHA.*|M.*
+
+  ibd_from_network:
+    end_height: 2_000
+    time_heights:
+      - 1_000
+
+  ibd_from_local:
+    run_count: 2
+    end_height: 2_000
+    stash_datadir: /tmp/datadir
+    time_heights:
+      - 500
+      - 1_300
+
+  ibd_range_from_local:
+    start_height: 500_000
+    end_height: 500_500
+    src_datadir: /data/bitcoin_pruned_500k
+    time_heights:
+      - 500_250
+      - 500_350
+
+  reindex:
+    enabled: false
+    src_datadir: /tmp/datadir
+    start_height: 1_000
+    end_height: 2_000
+    time_heights:
+      - 1_200
+      - 1_400
+
+  reindex_chainstate:
+    enabled: false
+    src_datadir: /tmp/datadir
+    end_height: 1_000
+    end_height: 2_000
+    time_heights:
+      - 7_000
+      - 9_000
+
+
+to_bench:
+
+  - gitref: master
+    bitcoind_extra_args: "-logthreadnames"
+
+  - gitref: 2019-05-obviously-slow
+    gitremote: jamesob
+    bitcoind_extra_args: "-logthreadnames"

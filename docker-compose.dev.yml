@@ -22,11 +22,12 @@ services:
       # heights.
       - SYNCED_BITCOIND_ARGS=-minimumchainwork=0x00
     volumes:
-      - .:/code:ro
+      - .:/code
 
       # You may need to change the source of this mount to a directory on your
       # host machine that contains a synced datadir.
-      - /data/bitcoin_bench:/bitcoin/data
+      - /data/bitcoin_bench:/data/bitcoin_bench
+      - /data/bitcoin_pruned_500k:/data/bitcoin_pruned_500k
 
   codespeed:
     ports:

@@ -30,13 +30,13 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
 
-  grafcli:
-    build:
-      context: ./grafana_management
-    volumes:
-      - ./grafana_management:/home/root
-    environment:
-      GRAFANA_API_TOKEN: "${GRAFANA_API_TOKEN}"
+#   grafcli:
+#     build:
+#       context: ./grafana_management
+#     volumes:
+#       - ./grafana_management:/home/root
+#     environment:
+#       GRAFANA_API_TOKEN: "${GRAFANA_API_TOKEN}"
 
 volumes:
   grafana-data:

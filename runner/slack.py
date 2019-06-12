@@ -18,8 +18,8 @@ class Client:
     def send_to_slack_attachment(
             self, gitco: GitCheckout, title, fields, text="", success=True):
         fields['Host'] = config.HOSTNAME
-        fields['Commit'] = (gitco.sha or '')[:6]
-        fields['Ref'] = gitco.ref
+        fields['Commit'] = (getattr(gitco, 'sha', ''))[:6]
+        fields['Ref'] = getattr(gitco, 'ref', '')
 
         data = {
             "attachments": [{
@@ -65,13 +65,13 @@ class SlackLogHandler(logging.Handler):
         # the remainder as text.
         title, *rest = fmtd.split('\n', 1)
         return self.client.send_to_slack_attachment(
-            self.cfg.current_git_ref, title, {},
+            G.gitco, title, {},
             text=(rest[0] if rest else None), success=False)
 
 
-def attach_slack_handler_to_logger(client: Client, logger):
+def attach_slack_handler_to_logger(cfg, client: Client, logger):
     """Can't do this in .logging because we need a cfg argument."""
-    slack = SlackLogHandler(client)
+    slack = SlackLogHandler(cfg, client)
     slack.setLevel(logging.WARNING)
     slack.setFormatter(logging.Formatter('%(message)s'))
     logger.addHandler(slack)

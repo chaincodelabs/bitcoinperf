@@ -6,8 +6,6 @@ import subprocess
 import shutil
 from pathlib import Path
 
-from psutil import Process
-
 from . import sh, logging
 
 logger = logging.get_logger()
@@ -30,6 +28,7 @@ _BENCH_SPECIFIC_BITCOIND_ARGS = (
 
 DEFAULT_ASSUMEVALID = (
     '000000000000000000176c192f42ad13ab159fdb20198b87e7ba3c001e47b876')
+DEFAULT_DBCACHE = 300
 
 
 class Node:
@@ -99,8 +98,8 @@ class Node:
 
         if 'dbcache' in kwargs:
             cmd += '-dbcache={} '.format(kwargs.pop('dbcache'))
-        if 'txindex' in kwargs:
-            cmd += '-txindex={} '.format(kwargs.pop('txindex'))
+        elif 'dbcache' not in self.extra_args:
+            cmd += '-dbcache={} '.format(DEFAULT_DBCACHE)
 
         # Supply a default assumevalid value unless the user has overridden it
         # at some point.
@@ -109,16 +108,12 @@ class Node:
         elif 'assumevalid' not in self.extra_args:
             cmd += '-assumevalid={} '.format(DEFAULT_ASSUMEVALID)
 
-        if 'stopatheight' in kwargs:
-            cmd += '-stopatheight={} '.format(kwargs.pop('stopatheight'))
-        if 'listen' in kwargs:
-            cmd += '-listen={} '.format(kwargs.pop('listen'))
-        if 'connect' in kwargs:
-            cmd += '-connect={} '.format(kwargs.pop('connect'))
-        if 'addnode' in kwargs:
-            cmd += '-addnode={} '.format(kwargs.pop('addnode'))
-
         cmd += '-debug={} '.format(kwargs.pop('debug', 'all'))
+
+        # Add remaining arguments
+        for k, v in kwargs.items():
+            cmd += '-{}={} '.format(k, v)
+
         cmd += '{} -port={} -rpcport={}'.format(
             _BENCH_SPECIFIC_BITCOIND_ARGS, self.port, self.rpcport)
 
@@ -145,8 +140,8 @@ class Node:
         for a in args:
             if any(a.startswith(i) for i in ignore_keys):
                 continue
-            if '=' in args:
-                k, v = args.split('=')
+            if '=' in a:
+                k, v = a.split('=')
                 d[k] = v
             else:
                 d[a] = 1
@@ -198,6 +193,7 @@ class Node:
                 "Couldn't bring node up: {} with command {}".format(
                     self, self.cmd.cmd))
 
+        logger.info("Node %s initialized successfully", self)
         return block_count
 
     def call_rpc(self, cmd,
@@ -233,10 +229,10 @@ class Node:
 
         return json.loads(call[0].decode()) if deserialize_output else None
 
-    def stop_via_rpc(self):
+    def stop_via_rpc(self, timeout=None):
         logger.info("Calling stop on %s", self)
         self.call_rpc("stop", deserialize_output=False)
-        self.ps.wait(timeout=120)
+        self.cmd.join(timeout=timeout)
 
     def terminate(self):
         logger.warning("Terminating %s", self)
@@ -262,8 +258,8 @@ class Node:
             return True
         return False
 
-    def join(self):
-        return self.cmd.join()
+    def join(self, timeout=None):
+        return self.cmd.join(timeout=timeout)
 
     def poll_for_height_and_progress(self) -> \
             t.Tuple[t.Optional[int], t.Optional[float]]:
@@ -275,7 +271,7 @@ class Node:
         tries_left = 20
         info = None
 
-        while tries_left > 0:
+        while tries_left > 0 and not info:
             info = self.call_rpc("getblockchaininfo")
 
             if not info:
@@ -291,7 +287,7 @@ class Node:
         last_height_seen = info['blocks']
         logger.debug("[%s] saw height %s", self, last_height_seen)
 
-        return (last_height_seen, info['verificationprogress'])
+        return (int(last_height_seen), float(info['verificationprogress']))
 
     def get_resource_usage(self) -> sh.ResourceUsage:
         return self.cmd.get_resource_usage()
@@ -316,7 +312,7 @@ def _find_unused_port(startval=8888) -> int:
     return portnum
 
 
-def get_synced_node(cfg, required_height: int) -> t.Optional[Node]:
+def get_synced_node(cfg, required_height: int = None) -> t.Optional[Node]:
     """
     Spawns a bitcoind instance that has a synced chain high enough to service
     an IBD up to the last checkpoint (`--ibd-checkpoints`).
@@ -329,9 +325,9 @@ def get_synced_node(cfg, required_height: int) -> t.Optional[Node]:
         return None
 
     server = Node(
-        cfg.synced_bitcoin_repo_dir / 'src' / 'bitcoind',
-        cfg.synced_datadir,
-        extra_args=cfg.synced_bitcoind_args,
+        cfg.synced_peer.repodir / 'src' / 'bitcoind',
+        cfg.synced_peer.datadir,
+        extra_args=cfg.synced_peer.bitcoind_extra_args,
     )
     server.start(connect=0, listen=1)
     server.wait_for_init(require_height=required_height)

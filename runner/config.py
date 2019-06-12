@@ -4,13 +4,13 @@ import multiprocessing
 import re
 import tempfile
 import typing as t
-from argparse import Namespace
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, validator, UrlStr, PositiveInt
+from pydantic import BaseModel, validator, PositiveInt
+import yaml
 
-from . import logging, slack
+from . import logging
 
 logger = logging.get_logger()
 
@@ -33,7 +33,9 @@ def is_valid_path(p: str):
 
 
 def is_writeable_path(p: str):
-    return os.access(Path(p).parent, os.W_OK)
+    if not os.access(Path(p).parent, os.W_OK):
+        raise ValueError("path {} is not writable".format(p))
+    return Path(p)
 
 
 def is_datadir(path: Path):
@@ -104,20 +106,10 @@ class WriteablePath(Path):
         yield is_writeable_path
 
 
-def _create_workdir(p: Path):
-    return p or tempfile.TemporaryDirectory(prefix='bitcoinperf')
-
-
-class Workdir(Path):
-    @classmethod
-    def __get_validators__(cls) -> 'CallableGenerator':
-        yield is_valid_path
-        yield _create_workdir
-
-
 class SyncedPeer(BaseModel):
     datadir: ExistingDatadir = ''
     repodir: BuiltRepoDir = ''
+    bitcoind_extra_args: str = ''
     # or
     address: NodeAddr = None
 
@@ -138,7 +130,7 @@ def get_envname():
 
 
 class Codespeed(BaseModel):
-    url: UrlStr
+    url: str
     username: str
     password: str
     envname: str = None
@@ -148,13 +140,13 @@ class Codespeed(BaseModel):
         return v or get_envname()
 
 
-class Slack(BaseModel):
-    webhook_url: UrlStr
-
-
 class Bench(BaseModel):
     enabled: bool = True
     run_count: PositiveInt = 1
+
+
+class BenchBuild(Bench):
+    num_jobs: t.Op[PositiveInt] = DEFAULT_NPROC
 
 
 class BenchUnittests(Bench):
@@ -167,6 +159,7 @@ class BenchFunctests(Bench):
 
 class BenchMicrobench(Bench):
     num_jobs: t.Op[PositiveInt] = DEFAULT_NPROC
+    filter: str = ''
 
 
 class BenchIbdFromNetwork(Bench):
@@ -191,22 +184,27 @@ class BenchIbdRangeFromLocal(Bench):
 
 
 class BenchReindex(Bench):
+    # TODO:
     # If None, we'll use the resulting datadir from the previous benchmark.
-    src_datadir: t.Op[ExistingDatadir] = None
+    src_datadir: t.Op[Path] = None
+    start_height: PositiveInt = 0
     end_height: PositiveInt = None
     time_heights: t.Op[t.List[PositiveInt]] = None
     stash_datadir: t.Op[WriteablePath] = None
 
 
 class BenchReindexChainstate(Bench):
+    # TODO:
     # If None, we'll use the resulting datadir from the previous benchmark.
-    src_datadir: t.Op[ExistingDatadir] = None
+    src_datadir: t.Op[Path] = None
+    start_height: PositiveInt = 0
     end_height: PositiveInt = None
     time_heights: t.Op[t.List[PositiveInt]] = None
     stash_datadir: t.Op[WriteablePath] = None
 
 
 class Benches(BaseModel):
+    build: t.Op[BenchBuild] = None
     unittests: t.Op[BenchUnittests] = None
     functests: t.Op[BenchFunctests] = None
     microbench: t.Op[BenchMicrobench] = None
@@ -219,15 +217,32 @@ class Benches(BaseModel):
 
 class Target(BaseModel):
     gitref: str
-    gitremote: str = ""
+    gitremote: str = "origin"
     bitcoind_extra_args: str = ""
     configure_args: str = ""
+
+    # Used for display in output.
+    name: str = ""
+
+    # If True, rebase this branch on top of latest master.
+    rebase: bool = True
 
     @property
     def id(self):
         return "{}-{}".format(
             self.gitref,
             re.sub(r'\s+', '', self.bitcoind_extra_args).replace('-', ''))
+
+    @validator('name', always=True)
+    def make_name(cls, v, values, **kwargs):
+        if not v:
+            return values['gitref']
+        return v
+
+    def __hash__(self):
+        return hash(
+            self.gitref + self.gitremote + self.bitcoind_extra_args +
+            self.configure_args + self.name)
 
 
 class Compilers(str, Enum):
@@ -236,37 +251,62 @@ class Compilers(str, Enum):
 
 
 class Slack(BaseModel):
-    webhook_url: UrlStr = None
-
-    def get_client(self):
-        return slack.Client(self.webhook_url)
+    webhook_url: str = None
 
 
 class Config(BaseModel):
-    workdir: Workdir = ''
-    synced_peer: SyncedPeer
+    workdir: Path = None
+    synced_peer: SyncedPeer = None
     compilers: t.List[Compilers] = [Compilers.clang, Compilers.gcc]
     slack: Slack = None
     log_level: str = 'INFO'
-    num_build_jobs: PositiveInt = DEFAULT_NPROC
     no_teardown: bool = False
     no_caution: bool = False
     no_clean: bool = False
     no_cache_drop: bool = False
     cache_build: bool = False
+    cache_git: bool = False
+    cache_build_size: int = 5
     codespeed: Codespeed = None
-    benches: Benches
+    benches: Benches = None
     to_bench: t.List[Target]
 
+    @validator('workdir', pre=True, always=True)
+    def mk_workdir(cls, v):
+        if not v:
+            return Path(tempfile.mkdtemp(prefix='bitcoinperf-'))
+        return Path(v)
+
+    @validator('benches', whole=True)
+    def check_peer(cls, v, values, **kwargs):
+        if v.ibd_from_network or v.ibd_from_local or v.ibd_range_from_local \
+                or v.reindex or v.reindex_chainstate:
+            if not values.get('synced_peer'):
+                raise ValueError(
+                    "synced_peer must be specified when running "
+                    "IBD- or reindex-based benchmarks")
+
+        return v
+
+    def bitcoinperf_home_path(self):
+        p = Path.home() / '.bitcoinperf'
+        p.mkdir(exist_ok=True)
+        return p
+
     def build_cache_path(self):
-        p = Path.home() / '.bitcoinperf' / 'build_cache'
+        p = self.bitcoinperf_home_path() / 'build_cache'
         p.mkdir(exist_ok=True, parents=True)
         return p
 
+    @property
+    def results_dir(self):
+        d = self.workdir / 'results'
+        d.mkdir(exist_ok=True)
+        return d
 
-def populate_run_counts(cfg):
-    for target in cfg.to_bench:
-        counts = {}
-        for benchname, benchcfg in cfg.benches.items():
-            counts[benchname] = benchcfg.run_count
-        G.run_counts[target.gitref] = counts
+
+def load(content: t.Union[Path, str]) -> Config:
+    if isinstance(content, Path):
+        content = content.read_text()
+
+    return Config(**yaml.load(content), Loader=yaml.Loader)

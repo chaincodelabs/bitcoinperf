@@ -20,6 +20,8 @@ G.benchmark: 'Benchmark' = None
 # Did we acquire the system-wide lockfile?
 G.lockfile_acquired: bool = False
 
+G.slack: 'SlackClient' = None
+
 # The number of remaining run counts:
 # {
 #   ref1: {

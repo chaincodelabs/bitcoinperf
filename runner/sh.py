@@ -2,6 +2,8 @@ import subprocess
 import logging
 import time
 import shutil
+import os
+import tempfile
 import typing as t
 from pathlib import Path
 
@@ -41,11 +43,12 @@ def run(*args, check_returncode=True, **kwargs) -> (bytes, bytes, int):
     return (stdout, stderr, p.returncode)
 
 
-def popen(args, env=None):
+def popen(args, env=None, stdout=None, stderr=None):
     logger.debug("Running command %r", args)
     return subprocess.Popen(
         args, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        stdout=(stdout or subprocess.PIPE),
+        stderr=(stderr or subprocess.PIPE), shell=True)
 
 
 class ResourceUsage(t.NamedTuple):
@@ -75,15 +78,30 @@ class Command:
         self.end_time = None
         self.stdout = None
         self.stderr = None
+        (self.stdout_fd, self.stdout_path) = tempfile.mkstemp(
+            prefix='bitcoinperf-stdout-')
+        (self.stderr_fd, self.stderr_path) = tempfile.mkstemp(
+            prefix='bitcoinperf-stderr-')
 
     def start(self):
         self.start_time = time.time()
-        self.ps = popen('$(which time) -f %M ' + self.cmd)
+        self.ps = popen(
+            '$(which time) -f %M ' + self.cmd,
+            stdout=self.stdout_fd,
+            stderr=self.stderr_fd,
+        )
         logger.debug("[%s] command '%s' starting", self.bench_name, self.cmd)
 
-    def join(self):
-        (self.stdout, self.stderr) = self.ps.communicate()
+    def join(self, timeout=None):
+        self.ps.wait(timeout=timeout)
         self.end_time = time.time()
+        self._read_outputs()
+
+    def _read_outputs(self):
+        self.stdout = Path(self.stdout_path).read_bytes()
+        self.stderr = Path(self.stderr_path).read_bytes()
+        os.unlink(self.stdout_path)
+        os.unlink(self.stderr_path)
 
     @property
     def total_secs(self) -> float:

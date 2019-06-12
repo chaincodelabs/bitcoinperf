@@ -12,11 +12,11 @@ import datetime
 import getpass
 import traceback
 import sys
-import yaml
+import pickle
 from pathlib import Path
 
 from . import (
-    output, config, bitcoind, results, slack, benchmarks, logging, git)
+    output, config, bitcoind, results, slack, benchmarks, logging, git, sh)
 from .globals import G
 from .logging import get_logger
 from .sh import run
@@ -54,21 +54,11 @@ def _startup_assertions(cfg):
 
     if run('cat /proc/swaps | grep -v "^Filename"',
             check_returncode=False)[2] != 1:
-        warn("swap must be disabled during benchmarking")
+        warn("swap should be disabled during benchmarking")
 
     if not _try_acquire_lockfile():
         raise RuntimeError(
             "Couldn't acquire lockfile %s; exiting", LOCKFILE_PATH)
-
-    synced_bitcoind_path = cfg.synced_bitcoin_repo_dir / 'src' / 'bitcoind'
-    if not (synced_bitcoind_path.is_file() and
-            os.access(synced_bitcoind_path, os.X_OK)):
-        raise RuntimeError("bitcoind executable missing at {}".format(
-            synced_bitcoind_path))
-
-    if not cfg.copy_from_datadir.is_dir():
-        raise RuntimeError("COPY_FROM_DATADIR doesn't exist ({})".format(
-            cfg.copy_from_datadir))
 
 
 def run_benches(cfg):
@@ -78,12 +68,21 @@ def run_benches(cfg):
     """
     logger.info(
         "Running benchmarks %s with compilers %s",
-        cfg.benches_to_run, cfg.compilers)
+        [i[0] for i in cfg.benches], cfg.compilers)
 
     _startup_assertions(cfg)
 
     for target in cfg.to_bench:
-        G.gitco = git.checkout_in_dir(cfg.workdir / 'bitcoin')
+        os.chdir(cfg.workdir)
+        if (cfg.workdir / 'bitcoin').exists():
+            sh.rm(cfg.workdir / 'bitcoin')
+
+        G.gitco = git.checkout_in_dir(
+            cfg,
+            target,
+            cfg.workdir / 'bitcoin',
+            # TODO: pass copy_from_path
+        )
 
         for compiler in cfg.compilers:
             G.compiler = compiler
@@ -122,13 +121,17 @@ def run_benches(cfg):
 
 
 def maybe_run_bench_some_times(
-        target, cfg, bench_cfg, bench_class, always_run=False):
+        target, cfg, bench_cfg, bench_class, *, always_run=False):
     if not bench_cfg and not always_run:
         logger.info("[%s] skipping benchmark", bench_class.name)
         return
+    elif not bench_cfg:
+        bench_cfg = config.BenchBuild()
 
-    for i in bench_cfg.run_count:
-        bench_class(cfg, bench_cfg, target, i)
+    for i in range(getattr(bench_cfg, 'run_count', 1)):
+        b = bench_class(cfg, bench_cfg, target, i)
+        results.ALL_RUNS.append(b)
+        b.wrapped_run(cfg, bench_cfg)
 
 
 def _try_acquire_lockfile():
@@ -141,7 +144,7 @@ def _try_acquire_lockfile():
     return True
 
 
-def _get_shutdown_handler(cfg: config.Config, should_teardown: bool):
+def _get_shutdown_handler(cfg: config.Config):
     def handler():
         for node in bitcoind.Node.all_instances:
             if node.ps and node.ps.returncode is None:
@@ -155,7 +158,7 @@ def _get_shutdown_handler(cfg: config.Config, should_teardown: bool):
 
         # Clean up to avoid filling disk
         # TODO add more granular cleanup options
-        if should_teardown and cfg.workdir.is_dir():
+        if (not cfg.no_teardown) and cfg.workdir.is_dir():
             os.chdir(cfg.workdir)
             _stash_debug_file(cfg)
 
@@ -163,7 +166,7 @@ def _get_shutdown_handler(cfg: config.Config, should_teardown: bool):
             # away the biggest subdir.
             run("rm -rf %s" % (cfg.workdir / 'bitcoin'))
             logger.debug("shutdown: removed bitcoin dir at %s", cfg.workdir)
-        elif not should_teardown:
+        elif cfg.no_teardown:
             logger.debug("shutdown: leaving bitcoin dir at %s", cfg.workdir)
 
     return handler
@@ -182,44 +185,60 @@ def _stash_debug_file(cfg: config.Config):
 
 
 def main():
-    config_file = Path(sys.argv[1])
-    if not config_file.exists():
-        print(".yaml config file required as only argument",
-              file=sys.stderr)
-        sys.exit(1)
+    arg = sys.argv[1]
+    cfg = None
 
-    cfg = config.Config(**yaml.load(config_file.read_text()))
-    logging.configure_logger(cfg)
+    if arg.endswith('yml') or arg.endswith('yaml'):
+        config_file = Path(sys.argv[1])
+        if not config_file.exists():
+            print(".yaml config file required as only argument",
+                  file=sys.stderr)
+            sys.exit(1)
 
-    if cfg.codespeed:
-        results.Reporters.codespeed = results.CodespeedReporter(cfg.codespeed)
+        cfg = config.load(config_file)
+        logging.configure_logger(cfg)
 
-    if cfg.slack:
-        slack.attach_slack_handler_to_logger(cfg.slack.get_client(), logger)
+        if cfg.codespeed:
+            results.Reporters.codespeed = results.CodespeedReporter(
+                cfg.codespeed)
 
-    atexit.register(_get_shutdown_handler(not cfg.no_teardown))
+        G.slack = slack.Client(cfg.slack.webhook_url if cfg.slack else '')
+        slack.attach_slack_handler_to_logger(cfg, G.slack, logger)
 
-    logger.info("Running with configuration:")
-    logger.info("")
-    for name, val in sorted(cfg.__dict__.items()):
-        logger.info("  {0:<26} {1:<40}".format(name, str(val)))
-    logger.info("")
+        atexit.register(_get_shutdown_handler(cfg))
 
-    try:
-        run_benches(cfg)
+        logger.info(cfg.to_string(pretty=True))
 
-        if len(cfg.to_bench) <= 1:
-            timestr = output.get_times_table(
-                results.REF_TO_NAME_TO_TIME[G.gitco.ref])
-            print(timestr)
-        else:
-            print(dict(results.REF_TO_NAME_TO_TIME))
-            output.print_comparative_times_table(results.REF_TO_NAME_TO_TIME)
-            output.make_plots(cfg, results.REF_TO_NAME_TO_TIME)
-    except Exception:
-        cfg.slack_client.send_to_slack_attachment(
-            G.gitco, "Error", {}, text=traceback.format_exc(), success=False)
-        raise
+        try:
+            run_benches(cfg)
+        except Exception:
+            G.slack.send_to_slack_attachment(
+                G.gitco, "Error", {},
+                text=traceback.format_exc(), success=False)
+            raise
+
+        try:
+            (cfg.results_dir / 'all_runs.pickle').write_bytes(pickle.dumps(
+                results.ALL_RUNS))
+            logger.info("Wrote serialized benchmark results to %s",
+                        cfg.results_dir / 'all_runs.pickle')
+        except Exception:
+            logger.exception("failed to pickle results")
+
+    elif arg.endswith('pickle'):
+        results.ALL_RUNS = pickle.loads(Path(arg).read_bytes())
+
+    grouped = output.GroupedRuns.from_list(results.ALL_RUNS)
+
+    if not cfg:
+        cfg = list(list(grouped.values())[0].values())[0][0].cfg
+
+    if len(cfg.to_bench) <= 1:
+        timestr = output.get_times_table(grouped)
+        print(timestr)
+    else:
+        output.print_comparative_times_table(cfg, grouped)
+        output.make_plots(cfg, grouped)
 
 
 if __name__ == '__main__':

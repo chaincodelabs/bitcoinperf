@@ -11,7 +11,7 @@ def configure_logger(cfg: 'Config', log_level: str = 'INFO'):
     sh.setFormatter(logging.Formatter(sh_log_fmt))
 
     # Always log debug out to a file in the workdir
-    filehandler = logging.handlers.FileHandler(cfg.workdir / "bitcoinperf.log")
+    filehandler = logging.FileHandler(cfg.workdir / "bitcoinperf.log")
     filehandler.setLevel(logging.DEBUG)
     file_log_fmt = '%(asctime)s %(name)s [%(levelname)s] %(message)s'
     filehandler.setFormatter(logging.Formatter(file_log_fmt))

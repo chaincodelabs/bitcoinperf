@@ -2,11 +2,13 @@ import requests
 import typing as t
 from dataclasses import dataclass, field
 
-from .config import Target
 from .git import GitCheckout
 from .logging import get_logger
 
 logger = get_logger()
+
+
+ALL_RUNS: t.List['Benchmarks'] = []
 
 
 class Reporters:
@@ -42,38 +44,46 @@ class MicrobenchResults(Results):
     bench_to_time: t.Dict[str, float] = field(default_factory=dict)
 
 
-def save_result(gitco: GitCheckout,
-                benchmark_name: str,
-                total_secs: float,
-                memusage_kib: float,
-                executable: str,
-                extra_data: dict = None):
+def report_result(benchmark: 'Benchmark',
+                  metric_name: str,
+                  val: float,
+                  *,
+                  extra_data: dict = None,
+                  report_to_codespeed: bool = True,
+                  ):
     """Save a result, forwarding it to all reporters."""
-    for reporter in [Reporters.codespeed, Reporters.log]:
+    for reporter in [Reporters.log, Reporters.codespeed]:
         if not reporter:
             continue
+        elif reporter == Reporters.codespeed and not report_to_codespeed:
+            continue
+
+        units = units_title = None
+        if metric_name.endswith('.mem-usage'):
+            units = 'KiB'
+            units_title = 'Size'
+
         try:
             reporter.save_result(
-                benchmark_name, total_secs, executable, extra_data)
+                benchmark.gitco, metric_name, val, extra_data,
+                units=units, units_title=units_title,
+            )
         except Exception:
             logger.exception("failed to save result with %s", reporter)
-
-        # This may be called before the command has completed (in the case of
-        # incremental IBD reports), so only report memory usage if we have
-        # access to it.
-        if memusage_kib is not None:
-            mem_name = benchmark_name + '.mem-usage'
-
-            reporter.save_result(
-                mem_name, memusage_kib, executable, extra_data,
-                units_title='Size', units='KiB')
 
 
 class Reporter:
     """Abstract interface for reporting results."""
     def save_result(self, gitco: GitCheckout, benchmark_name, value,
-                    executable,
                     extra_data=None, units_title=None, units=None):
+        pass
+
+
+class FileReporter:
+    def __init__(self, cfg):
+        pass
+
+    def save_result(self, gitco, benchmark_name, value, extra_data):
         pass
 
 
@@ -86,10 +96,11 @@ class CodespeedReporter:
         self.password = codespeed_cfg.password
 
     def save_result(self,
-                    gitco: GitCheckout, benchmark_name, value, executable,
+                    gitco: GitCheckout, benchmark_name, value,
                     extra_data=None, units_title=None, units=None):
+        extra_data = extra_data or {}
         self.send_to_codespeed(
-            gitco, benchmark_name, value, executable,
+            gitco, benchmark_name, value,
             extra_data=extra_data,
             result_max=extra_data.pop('result_max', None),
             result_min=extra_data.pop('result_min', None),
@@ -98,12 +109,34 @@ class CodespeedReporter:
     def send_to_codespeed(
             self,
             gitco: GitCheckout,
-            bench_name, result, executable,
+            bench_name, result,
             lessisbetter=True, units_title='Time', units='seconds',
             description='', result_max=None, result_min=None, extra_data=None):
         """
         Send a benchmark result to codespeed over HTTP.
         """
+        # This "executable" thing is unique to codespeed and kind of weird, so
+        # instead of burdening benchmark code with that, just adapt it here.
+        executable_map = {
+            'build': 'make',
+            'makecheck': 'unittests',
+            'functionaltests': 'functional-test-runner',
+            'micro.': 'bench-bitcoin',
+            'ibd.': 'bitcoind',
+            'reindex.': 'bitcoind',
+        }
+
+        executable = None
+
+        for prefix, exec_name in executable_map.items():
+            if bench_name.startswith(prefix):
+                executable = exec_name
+                break
+
+        if not executable:
+            raise ValueError("unknown executable for metric {}".format(
+                bench_name))
+
         # Mandatory fields
         data = {
             'commitid': gitco.sha,
