@@ -84,6 +84,18 @@ class NodeAddr(str):
         yield is_port_open
 
 
+def _expandvars(s: str):
+    if isinstance(s, str):
+        return os.path.expandvars(s)
+    return s
+
+
+class EnvStr(str):
+    @classmethod
+    def __get_validators__(cls):
+        yield _expandvars
+
+
 class ExistingDatadir(Path):
     @classmethod
     def __get_validators__(cls) -> 'CallableGenerator':
@@ -130,10 +142,10 @@ def get_envname():
 
 
 class Codespeed(BaseModel):
-    url: str
-    username: str
-    password: str
-    envname: str = None
+    url: EnvStr
+    username: EnvStr
+    password: EnvStr
+    envname: EnvStr = None
 
     @validator('envname')
     def infer_envname(cls, v):
@@ -216,13 +228,13 @@ class Benches(BaseModel):
 
 
 class Target(BaseModel):
-    gitref: str
-    gitremote: str = "origin"
-    bitcoind_extra_args: str = ""
-    configure_args: str = ""
+    gitref: EnvStr
+    gitremote: EnvStr = "origin"
+    bitcoind_extra_args: EnvStr = ""
+    configure_args: EnvStr = ""
 
     # Used for display in output.
-    name: str = ""
+    name: EnvStr = ""
 
     # If True, rebase this branch on top of latest master.
     rebase: bool = True
@@ -251,7 +263,7 @@ class Compilers(str, Enum):
 
 
 class Slack(BaseModel):
-    webhook_url: str = None
+    webhook_url: EnvStr = None
 
 
 class Config(BaseModel):

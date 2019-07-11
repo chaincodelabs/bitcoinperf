@@ -17,6 +17,7 @@ The benchmarks which are monitored are
 - Functional test framework duration (test/functional/test_runner.py)
 - Microbenchmarks (bench-bitcoin)
 - IBD up to some height from a local peer or from the P2P network
+- IBD of an interesting range of the chain (based on preexisting datadir)
 - Reindex up to some height
 
 The Python script (`bitcoinperf`) may be used as a standalone script
@@ -52,43 +53,16 @@ $ ./bin/dev up codespeed
 
 $ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.dev.yml
 
-# Compare v0.17.0 to the current tip
-
-$ ./bin/dev runbench \
-    bitcoinperf \
-    --commits "v0.16.0,master" \
-    --run-counts ibd:3 --benches-to-run gitclone,build,ibd --bitcoind-stopatheight 200000
-
+$ ./bin/dev runbench bitcoinperf examples/smoketest.yml
 ```
+
+Navigate to http://localhost:8000/ to see results reported to codespeed.
 
 ### Running unittests
 
 ```sh
 $ ./bin/dev up codespeed
 $ ./bin/dev test
-```
-
-### Quick use for local smoke tests
-
-```
-# Compare the v0.16.0 tag to current master for an IBD up to height 200,000.
-#
-# Do a total of 3 IBDs (`ibd:3`) for each commit.
-#
-bitcoinperf \
-  --commits "v0.16.0,master" \
-  --make-jobs $(nproc --ignore=1) \
-  --ibd-peer-address localhost \
-  --synced-data-dir /data/bitcoin_bench \
-  --synced-bitcoin-repo-dir "${HOME}/src/bitcoin_bench" \
-  --codespeed-url=http://localhost:8000 \
-  --codespeed-user=admin \
-  --codespeed-password=password \
-  --codespeed-envname=ccl-bench-hdd-1 \
-  --compilers=clang \
-  --benches-to-run=gitclone,build,ibd \
-  --run-counts ibd:3 --benches-to-run gitclone,build,ibd --bitcoind-stopatheight 200000
-
 ```
 
 ### Configuring Grafana
