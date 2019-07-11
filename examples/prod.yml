@@ -1,0 +1,54 @@
+---
+# The configuration file run for bitcoinperf.com's live site.
+
+compilers:
+  - gcc
+  - clang
+
+synced_peer:
+  datadir: /home/ccl/bitcoin_bench_data
+  repodir: /home/ccl/bitcoin
+  bitcoind_extra_args: ''
+
+codespeed:
+  url: "https://codespeed.bitcoinperf.com"
+  username: james
+  password: "${CODESPEED_PASSWORD}"
+  envname: ccl-bench-hdd-1
+
+slack:
+  webhook_url: "${SLACK_WEBHOOK_URL}"
+
+benches:
+  build:
+    num_jobs: 1
+
+  unittests:
+    num_jobs: 3
+
+  functests:
+    num_jobs: 1
+
+  microbench:
+    num_jobs: 1
+
+  ibd_from_local:
+    run_count: 1
+    stash_datadir: /tmp/datadir
+    time_heights:
+      - 522_000
+
+  reindex:
+    src_datadir: /tmp/datadir
+    time_heights:
+      - 522_000
+
+  # TODO: enable this
+  # reindex_chainstate:
+  #   src_datadir: /tmp/datadir
+  #   time_heights:
+  #     - 522_000
+
+
+to_bench:
+  - gitref: master
