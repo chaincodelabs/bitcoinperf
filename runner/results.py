@@ -178,3 +178,39 @@ class CodespeedReporter:
                 'the response is:\n%s'
                 % (resp.status_code, resp.text)
             )
+
+        # If the bench being reported is IBD or reindex, report the same result
+        # additionally under a different name.
+        #
+        # This maintains historical compatibility with previous versions of the
+        # database when we'd embed the dbcache value in the benchmark name.
+        # This allows us to continue showing historical data on grafana
+        # dashboards without having to migrate anything. It's shamefully lazy.
+        #
+        compat_bench_name = None
+
+        if bench_name.startswith('ibd.local'):
+            name_split = bench_name.split('.')
+            name_split.insert(3, 'dbcache={}'.format(
+                extra_data.get('dbcache', None)))
+            compat_bench_name = '.'.join(name_split)
+
+        elif bench_name.startswith('reindex.'):
+            name_split = bench_name.split('.')
+            name_split.insert(2, 'dbcache={}'.format(
+                extra_data.get('dbcache', None)))
+            compat_bench_name = '.'.join(name_split)
+
+        if compat_bench_name:
+            data['benchmark'] = compat_bench_name
+
+            resp = requests.post(
+                self.server_url + '/result/add/',
+                data=data, auth=(self.username, self.password))
+
+            if resp.status_code != 202:
+                raise ValueError(
+                    'Request to codespeed returned an error %s, '
+                    'the response is:\n%s'
+                    % (resp.status_code, resp.text)
+                )

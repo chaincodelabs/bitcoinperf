@@ -424,8 +424,7 @@ class IbdBench(Benchmark):
                 False, final_name, self.client_node.cmd)
             return False
 
-        _log_bench_result(
-            True, final_name, self.client_node.cmd)
+        _log_bench_result(True, final_name, self.client_node.cmd)
 
         # Mark measurements for all heights remaining.
         #
