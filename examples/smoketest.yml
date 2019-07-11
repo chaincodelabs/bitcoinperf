@@ -71,6 +71,9 @@ benches:
   reindex:
     enabled: false
     src_datadir: /tmp/datadir
+    # Restash the datadir once we're done indexing so we can run
+    # reindex_chainstate.
+    stash_datadir: /tmp/datadir
     start_height: 1_000
     end_height: 2_000
     time_heights:

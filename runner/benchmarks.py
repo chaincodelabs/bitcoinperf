@@ -484,8 +484,14 @@ class IbdBench(Benchmark):
             self.server_node.stop_via_rpc(timeout=120)
 
         if getattr(self.bench_cfg, 'stash_datadir', None):
+            # If the src_datadir is the same one that we'll stash to,
+            # don't do anything.
+            if self.bench_cfg.src_datadir == self.bench_cfg.stash_datadir:
+                return
+
             if self.bench_cfg.stash_datadir.exists():
                 shutil.rmtree(self.bench_cfg.stash_datadir)
+
             (self.cfg.workdir / 'data').replace(self.bench_cfg.stash_datadir)
             logger.info("Stashed datadir from %s -> %s",
                         self.cfg.workdir / 'data',
