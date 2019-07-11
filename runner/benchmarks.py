@@ -65,7 +65,7 @@ class Benchmark(abc.ABC):
 
     def wrapped_run(self, cfg, bench_cfg):
         """Called externally."""
-        if not (cfg.no_caution or cfg.no_cache_drop):
+        if cfg.safety_checks and cfg.drop_caches:
             sh.drop_caches()
 
         G.benchmark = self.__class__
@@ -131,7 +131,7 @@ class Build(Benchmark):
 
         # Ensure build is clean.
         makefile_path = cfg.workdir / 'bitcoin' / 'Makefile'
-        if makefile_path.is_file() and not cfg.no_clean:
+        if makefile_path.is_file() and cfg.clean:
             sh.run('make distclean')
 
         boostflags = ''
@@ -231,7 +231,7 @@ class Microbench(Benchmark):
 
     def _run(self, cfg, bench_cfg):
         time_start = time.time()
-        if not cfg.no_caution:
+        if cfg.safety_checks and cfg.drop_caches:
             sh.drop_caches()
         cmd_str = "./src/bench/bench_bitcoin"
 

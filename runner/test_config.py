@@ -70,8 +70,8 @@ artifact_dir: /tmp/output
 # subsequent runs.
 cache_build: true
 
-# Set to true to disable cache dropping and various safety checks.
-no_caution: false
+# Set to false to disable cache dropping and various safety checks.
+safety_checks: true
 
 synced_peer:
   datadir: /tmp/bitcoin_pruned_500k

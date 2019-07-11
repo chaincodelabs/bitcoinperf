@@ -39,17 +39,17 @@ def _startup_assertions(cfg):
         raise RuntimeError("the time package is required")
 
     def warn(msg):
-        if cfg.no_caution:
-            logger.warning(msg)
-        else:
+        if cfg.safety_checks:
             raise RuntimeError(msg)
+        else:
+            logger.warning(msg)
 
     if run("pgrep --list-name bitcoin | grep -v bitcoinperf",
             check_returncode=False)[2] == 0:
         warn("benchmarks shouldn't run concurrently with unrelated bitcoin "
              "processes")
 
-    if not cfg.no_caution:
+    if cfg.safety_checks:
         run('sudo swapoff -a')
 
     if run('cat /proc/swaps | grep -v "^Filename"',
@@ -158,7 +158,7 @@ def _get_shutdown_handler(cfg: config.Config):
 
         # Clean up to avoid filling disk
         # TODO add more granular cleanup options
-        if (not cfg.no_teardown) and cfg.workdir.is_dir():
+        if cfg.teardown and cfg.workdir.is_dir():
             os.chdir(cfg.workdir)
             _stash_debug_file(cfg)
 
@@ -166,7 +166,7 @@ def _get_shutdown_handler(cfg: config.Config):
             # away the biggest subdir.
             run("rm -rf %s" % (cfg.workdir / 'bitcoin'))
             logger.debug("shutdown: removed bitcoin dir at %s", cfg.workdir)
-        elif cfg.no_teardown:
+        elif not cfg.teardown:
             logger.debug("shutdown: leaving bitcoin dir at %s", cfg.workdir)
 
     return handler

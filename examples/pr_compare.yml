@@ -10,8 +10,8 @@ cache_build: true
 # If true, the first git clone will be cached and copied from as necessary.
 cache_git: true
 
-# Set to true to disable cache dropping and various safety checks.
-no_caution: true
+# Set to false to disable cache dropping and various safety checks.
+safety_checks: false
 
 synced_peer:
   datadir: /data/bitcoin_bench

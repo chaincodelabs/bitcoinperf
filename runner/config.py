@@ -272,10 +272,10 @@ class Config(BaseModel):
     compilers: t.List[Compilers] = [Compilers.clang, Compilers.gcc]
     slack: Slack = None
     log_level: str = 'INFO'
-    no_teardown: bool = False
-    no_caution: bool = False
-    no_clean: bool = False
-    no_cache_drop: bool = False
+    teardown: bool = True
+    safety_checks: bool = True
+    clean: bool = True
+    drop_caches: bool = True
     cache_build: bool = False
     cache_git: bool = False
     cache_build_size: int = 5
