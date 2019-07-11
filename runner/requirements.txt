@@ -1,2 +1,7 @@
 requests
 pytablewriter
+psutil
+numpy
+matplotlib
+pyyaml
+pydantic

@@ -1,0 +1,43 @@
+---
+
+# Where various data output is dumped
+artifact_dir: /tmp/output
+
+# Cache a built bitcoin src directory and restore it from the cache on
+# subsequent runs.
+cache_build: true
+
+# If true, the first git clone will be cached and copied from as necessary.
+cache_git: true
+
+# Set to false to disable cache dropping and various safety checks.
+safety_checks: false
+
+synced_peer:
+  datadir: /data/bitcoin_bench
+  repodir: /home/james/src/bitcoin_bench
+  bitcoind_extra_args: ''
+
+  # or, if over network
+  #
+  # address:
+
+
+benches:
+  
+  ibd_range_from_local:
+    run_count: 3
+    start_height: 500_000
+    end_height: 505_000
+    src_datadir: /data/bitcoin_pruned_500k
+    time_heights:
+      - 500_250
+      - 500_350
+
+
+to_bench:
+
+  - gitref: 2019-06-add-second-thread
+    gitremote: TheBlueMatt
+
+  - gitref: master

@@ -9,23 +9,21 @@ def test_print_comparative_times_table():
     for _ in range(30):
         strio = StringIO()
         output.print_comparative_times_table(
-            {'a': {'bench1': [1, 1, 1]}, 'b': {'bench1': [3, 3, 3]}},
+            {'a': {'bench1': [1, 1, 2]}, 'b': {'bench1': [3, 3, 4]}},
             strio)
 
         a = strio.getvalue()
         assert a == dedent(
             """
             # a vs. b (absolute)
-            |  name  | iterations |  a  |  b  |
-            |--------|-----------:|----:|----:|
-            | bench1 |          3 |   1 |   3 |
-
+            |  name  | iterations |           a            |           b            |
+            |--------|-----------:|------------------------|------------------------|
+            | bench1 |          3 | 1.3333 (stddev 0.4714) | 3.3333 (stddev 0.4714) |
 
             # a vs. b (relative)
-            |  name  | iterations |  a  |  b  |
-            |--------|-----------:|----:|----:|
-            | bench1 |          3 |   1 |   3 |
-
+            |  name  | iterations |  a  |   b   |
+            |--------|-----------:|----:|------:|
+            | bench1 |          3 |   1 | 2.500 |
             """
         )
 

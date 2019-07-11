@@ -1,8 +1,8 @@
-FROM debian:9-slim
+FROM python:3.7-stretch
 
 COPY runner/provision /usr/bin/provision
 RUN /usr/bin/provision
-RUN git clone -b v0.16.1 https://github.com/bitcoin/bitcoin.git /bitcoin
+RUN git clone -b v0.18.0 https://github.com/bitcoin/bitcoin.git /bitcoin
 WORKDIR /bitcoin
 RUN mkdir /bitcoin/data
 ENV BDB_PREFIX /bitcoin/db4
@@ -14,4 +14,4 @@ RUN ./contrib/install_db4.sh . && \
 WORKDIR /code
 COPY setup.py /code/
 COPY runner /code/runner
-RUN pip3 install --upgrade -e . && pip3 install pytest
+RUN pip3 install -e . && pip3 install pytest ipython

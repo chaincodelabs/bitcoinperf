@@ -4,10 +4,10 @@
 
 This repository consists of a few components
 
+- a haphazard Python script for running high-level Bitcoin Core benchmarks which
+  POSTs results to codespeed,
 - a [codespeed](https://github.com/chaincodelabs/codespeed) installation which
   collects and presents benchmarking results in a web interface, and
-- a haphazard Python script for running high-level Bitcoin Core benchmarks which
-  POSTs results to codespeed, and
 - a Grafana interface for presenting the benchmark results.
 
 The benchmarks which are monitored are
@@ -17,6 +17,7 @@ The benchmarks which are monitored are
 - Functional test framework duration (test/functional/test_runner.py)
 - Microbenchmarks (bench-bitcoin)
 - IBD up to some height from a local peer or from the P2P network
+- IBD of an interesting range of the chain (based on preexisting datadir)
 - Reindex up to some height
 
 The Python script (`bitcoinperf`) may be used as a standalone script
@@ -24,8 +25,17 @@ The Python script (`bitcoinperf`) may be used as a standalone script
 different Bitcoin commits locally - without necessarily writing to a remote
 codespeed instance.
 
+### Example local usage (no docker)
 
-### Example local usage
+```sh
+pip3 install --user .
+bitcoinperf --help
+```
+
+See the [examples/](examples/) for sample usages.
+
+
+### Example local usage (docker)
 
 First, you may have to modify the `synced` mountpoint in `docker-compose.yml`
 from `/data/bitcoin_bench` to a path on your machine that corresponds to a
@@ -37,19 +47,22 @@ Install docker & docker-compose, then run
 ```sh
 # Bring up codespeed server and a synced bitcoind instance
 
-$ ./bin/dev up codespeed synced
+$ ./bin/dev up codespeed
 
 # Modify docker-compose.yml to reference a synced datadir on your host machine.
 
 $ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.dev.yml
 
-# Compare v0.16.0 to the current tip
+$ ./bin/dev runbench bitcoinperf examples/smoketest.yml
+```
 
-$ ./bin/dev dc run --rm bench \
-    bitcoinperf \
-    --commits "v0.16.0,master"
-    --run-counts ibd:3 --benches-to-run gitclone,build,ibd --bitcoind-stopatheight 200000
+Navigate to http://localhost:8000/ to see results reported to codespeed.
 
+### Running unittests
+
+```sh
+$ ./bin/dev up codespeed
+$ ./bin/dev test
 ```
 
 ### Configuring Grafana

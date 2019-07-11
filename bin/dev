@@ -4,11 +4,11 @@
 # Shortcuts for local development.
 
 CMD="$1"; shift;
- 
+
 base_cmd() {
   docker-compose -f docker-compose.yml -f docker-compose.dev.yml "$@"
 }
- 
+
 if [[ "$CMD" == "dc" ]]; then
   base_cmd "$@"
 
@@ -18,8 +18,22 @@ elif [[ "$CMD" == "up" ]]; then
 
 elif [[ "$CMD" == "logs" ]]; then
   base_cmd logs -f "$@"
-                      
+
 elif [[ "$CMD" == "runc" ]]; then
   base_cmd run --rm codespeed "$@"
-                      
+
+elif [[ "$CMD" == "runbench" ]]; then
+  base_cmd run --rm bench "$@"
+
+elif [[ "$CMD" == "deps" ]]; then
+  base_cmd run --rm codespeed pipenv lock
+  base_cmd stop codespeed
+  base_cmd build --no-cache codespeed
+ 
+elif [[ "$CMD" == "test" ]]; then
+  base_cmd run --rm bench pytest "$@"
+ 
+else
+  base_cmd "$CMD" "$@"
+
 fi
