@@ -189,15 +189,20 @@ class CodespeedReporter:
         #
         compat_bench_name = None
 
-        if bench_name.startswith('ibd.local'):
+        if bench_name.startswith('ibd.local') or \
+                bench_name.startswith('reindex.'):
             name_split = bench_name.split('.')
-            name_split.insert(3, 'dbcache={}'.format(
-                extra_data.get('dbcache', None)))
-            compat_bench_name = '.'.join(name_split)
+            last_digit_idx = 0
 
-        elif bench_name.startswith('reindex.'):
-            name_split = bench_name.split('.')
-            name_split.insert(2, 'dbcache={}'.format(
+            # Insert the dbcache value after the last digit in the name.
+            for i, part in enumerate(name_split):
+                try:
+                    int(part)
+                    last_digit_idx = i
+                except Exception:
+                    pass
+
+            name_split.insert(last_digit_idx + 1, 'dbcache={}'.format(
                 extra_data.get('dbcache', None)))
             compat_bench_name = '.'.join(name_split)
 
