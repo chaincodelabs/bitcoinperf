@@ -78,6 +78,9 @@ class Benchmark(abc.ABC):
                 "[%s] failed with an exception", self.id or self.name)
             raise
         finally:
+            # FWIW, on Ctrl+C teardown is unconditionally handled by
+            # `main._get_shutdown_handler`. Running this again shouldn't
+            # cause a problem though.
             self._teardown()
 
         logger.info("[%s] done", self.id or self.name)
@@ -338,7 +341,7 @@ class IbdBench(Benchmark):
             (last_height_seen, progress) = (
                 client_node.poll_for_height_and_progress())
 
-            logger.info(
+            logger.debug(
                 "Last saw height=%s progress=%s", last_height_seen, progress)
 
             if last_height_seen is None and progress is None:
@@ -383,7 +386,7 @@ class IbdBench(Benchmark):
                 results.report_result(
                     self,
                     self._get_codespeed_bench_name(report_at_height) +
-                    '.mem_usage',
+                    '.mem-usage',
                     client_node.cmd.memusage_kib(),
                     extra_data={'height': last_height_seen, **extra_data},
                 )
@@ -397,7 +400,7 @@ class IbdBench(Benchmark):
                 last_resource_usage.num_fds,
             )
 
-            if iters % 50 == 0:
+            if iters % 500 == 0:
                 logger.info(
                     "Last saw height=%s progress=%s",
                     last_height_seen, progress)
@@ -411,10 +414,14 @@ class IbdBench(Benchmark):
         final_time = time.time() - start_time
         final_name = self._get_codespeed_bench_name(last_height_seen)
 
+        before_shutdown = time.time()
+
         if client_node.ps.returncode is None:
             client_node.stop_via_rpc(timeout=120)
         else:
             client_node.ps.join()
+
+        logger.info("Shutdown took %s seconds", time.time() - before_shutdown)
 
         # Don't finalize results if the IBD was a failure.
         #
@@ -449,7 +456,7 @@ class IbdBench(Benchmark):
 
         # Record the time-to-tip if we didn't specify an end height.
         #
-        if not bench_cfg.end_height:
+        if progress > 0.999 and not bench_cfg.end_height:
             results.report_result(
                 self,
                 self._get_codespeed_bench_name('tip'),
@@ -484,9 +491,11 @@ class IbdBench(Benchmark):
             self.server_node.stop_via_rpc(timeout=120)
 
         if getattr(self.bench_cfg, 'stash_datadir', None):
+            src_datadir = getattr(self.bench_cfg, 'src_datadir', None)
+
             # If the src_datadir is the same one that we'll stash to,
-            # don't do anything.
-            if self.bench_cfg.src_datadir == self.bench_cfg.stash_datadir:
+            # leave it in place.
+            if src_datadir == self.bench_cfg.stash_datadir:
                 return
 
             if self.bench_cfg.stash_datadir.exists():

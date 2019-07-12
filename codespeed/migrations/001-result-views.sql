@@ -1,5 +1,5 @@
 --
--- This file creates a number of views that make constructing queries 
+-- This file creates a number of views that make constructing queries
 -- on Grafana much easier.
 --
 
@@ -37,7 +37,8 @@ INNER JOIN codespeed_benchmark as bench ON res.benchmark_id = bench.id
 INNER JOIN codespeed_environment as env ON res.environment_id = env.id
 INNER JOIN codespeed_revision as rev ON res.revision_id = rev.id
 WHERE
-  bench.name like 'ibd.%' AND bench.name not like '%.mem-usage';
+  bench.name like 'ibd.%' AND bench.name like '%.dbcache=%' AND
+  bench.name not like '%.mem-usage';
 
 
 CREATE OR REPLACE VIEW ibd_memusage_result AS

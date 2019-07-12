@@ -37,21 +37,24 @@ benches:
     stash_datadir: /tmp/datadir
     time_heights:
       - 522_000
+    end_height: 522_000
 
   reindex:
-    src_datadir: /tmp/datadir
-    time_heights:
-      - 522_000
-
-  reindex_chainstate:
     # Restash the datadir once we're done indexing so we can run
     # reindex_chainstate.
     stash_datadir: /tmp/datadir
     src_datadir: /tmp/datadir
     time_heights:
       - 522_000
+    end_height: 522_000
+
+  reindex_chainstate:
+    src_datadir: /tmp/datadir
+    time_heights:
+      - 522_000
+    end_height: 522_000
 
 
 to_bench:
   - gitref: master
-    bitcoind_extra_args: '-dbcache=2048'
+    bitcoind_extra_args: '-dbcache=2048 -txindex=1'

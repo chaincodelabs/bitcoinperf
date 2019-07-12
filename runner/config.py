@@ -138,6 +138,7 @@ def get_envname():
         'bench-raspi-1': 'ccl-bench-raspi-1',
         'bench-hdd-1': 'ccl-bench-hdd-1',
         'bench-ssd-1': 'ccl-bench-ssd-1',
+        'bench-ssd-6': 'ccl-bench-ssd-6',
     }.get(HOSTNAME, '')
 
 
