@@ -124,6 +124,7 @@ class CodespeedReporter:
             'micro.': 'bench-bitcoin',
             'ibd.': 'bitcoind',
             'reindex.': 'bitcoind',
+            'reindex_chainstate.': 'bitcoind',
         }
 
         executable = None
