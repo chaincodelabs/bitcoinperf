@@ -148,7 +148,7 @@ class Codespeed(BaseModel):
     password: EnvStr
     envname: EnvStr = None
 
-    @validator('envname')
+    @validator('envname', always=True)
     def infer_envname(cls, v):
         return v or get_envname()
 
