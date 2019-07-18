@@ -68,7 +68,7 @@ def run_benches(cfg):
     """
     logger.info(
         "Running benchmarks %s with compilers %s",
-        [i[0] for i in cfg.benches], cfg.compilers)
+        [i[0] for i in cfg.benches if i[1]], cfg.compilers)
 
     _startup_assertions(cfg)
 
@@ -207,6 +207,8 @@ def main():
 
         atexit.register(_get_shutdown_handler(cfg))
 
+        logger.info("Started on host %s (codespeed env %s)",
+                    config.HOSTNAME, config.get_envname())
         logger.info(cfg.to_string(pretty=True))
 
         try:

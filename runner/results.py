@@ -44,7 +44,7 @@ class MicrobenchResults(Results):
     bench_to_time: t.Dict[str, float] = field(default_factory=dict)
 
 
-def report_result(benchmark: 'Benchmark',
+def report_result(benchmark,
                   metric_name: str,
                   val: float,
                   *,
@@ -169,16 +169,7 @@ class CodespeedReporter:
         if not self.server_url:
             return
 
-        resp = requests.post(
-            self.server_url + '/result/add/',
-            data=data, auth=(self.username, self.password))
-
-        if resp.status_code != 202:
-            raise ValueError(
-                'Request to codespeed returned an error %s, '
-                'the response is:\n%s'
-                % (resp.status_code, resp.text)
-            )
+        self._result_add_http(data)
 
         # If the bench being reported is IBD or reindex, report the same result
         # additionally under a different name.
@@ -209,14 +200,19 @@ class CodespeedReporter:
 
         if compat_bench_name:
             data['benchmark'] = compat_bench_name
+            self._result_add_http(data)
 
-            resp = requests.post(
-                self.server_url + '/result/add/',
-                data=data, auth=(self.username, self.password))
+    def _result_add_http(self, data):
+        url = self.server_url + '/result/add/'
+        logger.info("Posting data to %s:\n%s", url, data)
+        resp = requests.post(
+            url, data=data, auth=(self.username, self.password))
 
-            if resp.status_code != 202:
-                raise ValueError(
-                    'Request to codespeed returned an error %s, '
-                    'the response is:\n%s'
-                    % (resp.status_code, resp.text)
-                )
+        if resp.status_code != 202:
+            raise ValueError(
+                'Request to codespeed returned an error %s, '
+                'the response is:\n%s'
+                % (resp.status_code, resp.text)
+            )
+
+        return resp
