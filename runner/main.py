@@ -208,7 +208,7 @@ def main():
         atexit.register(_get_shutdown_handler(cfg))
 
         logger.info("Started on host %s (codespeed env %s)",
-                    config.HOSTNAME, config.get_envname())
+                    config.HOSTNAME, config.codespeed.envname)
         logger.info(cfg.to_string(pretty=True))
 
         try:

@@ -14,7 +14,6 @@ codespeed:
   url: "https://codespeed.bitcoinperf.com"
   username: james
   password: "${CODESPEED_PASSWORD}"
-  envname: ccl-bench-hdd-1
 
 slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
