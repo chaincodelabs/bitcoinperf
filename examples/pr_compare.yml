@@ -34,6 +34,10 @@ benches:
     start_height: 500_000
     end_height: 501_500
     # You will likely have to change this.
+    #
+    # This should point to a datadir that has been synced up to
+    # block 500_000.
+    #
     src_datadir: /data/bitcoin_pruned_500k
 
 to_bench:
