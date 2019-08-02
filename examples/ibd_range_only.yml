@@ -1,8 +1,5 @@
 ---
 
-# Where various data output is dumped
-artifact_dir: /tmp/output
-
 # Cache a built bitcoin src directory and restore it from the cache on
 # subsequent runs.
 cache_build: true

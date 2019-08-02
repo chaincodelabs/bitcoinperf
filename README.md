@@ -29,7 +29,8 @@ codespeed instance.
 
 ```sh
 pip3 install --user .
-bitcoinperf --help
+bitcoinperf [path to YAML config file]
+bitcoinperf examples/pr_compare.yml
 ```
 
 See the [examples/](examples/) for sample usages.
