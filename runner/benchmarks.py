@@ -400,7 +400,7 @@ class IbdBench(Benchmark):
                 last_resource_usage.num_fds,
             )
 
-            if iters % 500 == 0:
+            if iters % 120 == 0:
                 logger.info(
                     "Last saw height=%s progress=%s",
                     last_height_seen, progress)
