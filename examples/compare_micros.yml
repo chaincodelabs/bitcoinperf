@@ -24,9 +24,8 @@ compilers:
   - gcc
 
 benches:
-
   build:
-    num_jobs: 22
+    num_jobs: 5
 
   microbench:
     run_count: 3

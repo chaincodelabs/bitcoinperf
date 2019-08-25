@@ -4,11 +4,14 @@
 
 This repository consists of a few components
 
-- a haphazard Python script for running high-level Bitcoin Core benchmarks which
-  POSTs results to codespeed,
+- a haphazard Python script for running high-level Bitcoin Core benchmarks,
 - a [codespeed](https://github.com/chaincodelabs/codespeed) installation which
   collects and presents benchmarking results in a web interface, and
 - a Grafana interface for presenting the benchmark results.
+
+![nice things](./img/ibd.png)
+
+*It even uses matplotlib to generate graphs that look decent half the time.*
 
 The benchmarks which are monitored are
 
@@ -29,7 +32,8 @@ codespeed instance.
 
 ```sh
 pip3 install --user .
-bitcoinperf --help
+bitcoinperf [path to YAML config file]
+bitcoinperf examples/pr_compare.yml
 ```
 
 See the [examples/](examples/) for sample usages.
