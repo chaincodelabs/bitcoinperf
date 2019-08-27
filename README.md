@@ -30,9 +30,11 @@ codespeed instance.
 
 ### Example local usage (no docker)
 
+You must have Python 3.7 or greater installed.
+
 ```sh
-pip3 install --user .
-bitcoinperf [path to YAML config file]
+python3.7 -m pip install --user -e .
+# bitcoinperf [path to YAML config file]
 bitcoinperf examples/pr_compare.yml
 ```
 

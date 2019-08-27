@@ -1,0 +1,43 @@
+---
+
+# Cache a built bitcoin src directory and restore it from the cache on
+# subsequent runs.
+cache_build: true
+
+# If true, the first git clone will be cached and copied from as necessary.
+cache_git: true
+
+# Set to false to disable cache dropping and various safety checks.
+safety_checks: false
+
+
+synced_peer:
+
+  # This is a location on your machine where you have a datadir synced up to at
+  # least the height that you reference in `ibd_range_from_local.end_height`.
+  datadir: /data/bitcoin_bench
+
+  # This is a location on your machine where you have a build `./src/bitcoind`
+  # binary.
+  repodir: /home/james/src/bitcoin_bench
+
+  bitcoind_extra_args: ''
+
+
+benches:
+  
+  ibd_range_from_local:
+    run_count: 2
+    start_height: 500_000
+    end_height: 525_000
+
+    # This is a location on your machine where you have a datadir that is
+    # synced up to `start_height`. I use a pruned datadir, but that's optional.
+    src_datadir: /data/bitcoin_pruned_500k
+
+
+to_bench:
+
+  - gitref: 2019-08-robinhood
+    gitremote: jamesob
+  - gitref: master 
