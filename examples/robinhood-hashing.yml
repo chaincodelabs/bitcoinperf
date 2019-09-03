@@ -10,12 +10,15 @@ cache_git: true
 # Set to false to disable cache dropping and various safety checks.
 safety_checks: false
 
+compilers:
+  - clang
+
 
 synced_peer:
 
   # This is a location on your machine where you have a datadir synced up to at
   # least the height that you reference in `ibd_range_from_local.end_height`.
-  datadir: /data/bitcoin_bench
+  datadir: /data/bitcoin
 
   # This is a location on your machine where you have a build `./src/bitcoind`
   # binary.
@@ -27,9 +30,9 @@ synced_peer:
 benches:
   
   ibd_range_from_local:
-    run_count: 2
+    run_count: 3
     start_height: 500_000
-    end_height: 525_000
+    end_height: 535_000
 
     # This is a location on your machine where you have a datadir that is
     # synced up to `start_height`. I use a pruned datadir, but that's optional.
@@ -41,3 +44,5 @@ to_bench:
   - gitref: 2019-08-robinhood
     gitremote: jamesob
   - gitref: master 
+  - gitref: 2019-09-robinhood-slim
+    gitremote: jamesob

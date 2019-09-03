@@ -10,8 +10,11 @@ cache_git: true
 # Set to false to disable cache dropping and various safety checks.
 safety_checks: false
 
+compilers:
+  - clang
+
 synced_peer:
-  datadir: /data/bitcoin_bench
+  datadir: /data/bitcoin
   repodir: /home/james/src/bitcoin_bench
   bitcoind_extra_args: ''
 
@@ -23,18 +26,17 @@ synced_peer:
 benches:
   
   ibd_range_from_local:
-    run_count: 3
+    run_count: 2
     start_height: 500_000
-    end_height: 505_000
+    end_height: 525_000
     src_datadir: /data/bitcoin_pruned_500k
-    time_heights:
-      - 500_250
-      - 500_350
 
 
 to_bench:
 
-  - gitref: 2019-06-add-second-thread
-    gitremote: TheBlueMatt
+  - gitref: 2019-08-noundo
+    gitremote: jamesob
+    bitcoind_extra_args: '-dbcache=3000'
 
   - gitref: master
+    bitcoind_extra_args: '-dbcache=3000'
