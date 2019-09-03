@@ -417,7 +417,8 @@ class IbdBench(Benchmark):
         before_shutdown = time.time()
 
         if client_node.ps.returncode is None:
-            client_node.stop_via_rpc(timeout=120)
+            # Longer timeout - might be flushing cache
+            client_node.stop_via_rpc(timeout=(60 * 25))
         else:
             client_node.ps.join()
 
@@ -486,7 +487,8 @@ class IbdBench(Benchmark):
         Shut down all the nodes we started and stash the datadir if need be.
         """
         if self.client_node.is_process_alive:
-            self.client_node.stop_via_rpc(timeout=120)
+            # Longer timeout - might be flushing cache
+            self.client_node.stop_via_rpc(timeout=(60 * 25))
         if self.server_node:
             self.server_node.stop_via_rpc(timeout=120)
 
