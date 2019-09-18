@@ -7,6 +7,7 @@ Where:
     <hostname>  Hostname to run bench on.
 """
 import sys
+import argparse
 import itertools
 import os
 import datetime
@@ -17,7 +18,7 @@ import mitogen
 from fscm import run, runmany
 
 
-def bench(count):
+def bench(count, args):
     outd = {}
     to_bench = [
         'jamesob/2019-08-robinhood',
@@ -46,7 +47,7 @@ def bench(count):
 
     print(bench_order)
     for ref in bench_order:
-        out = _parse_time_output(run_reindex(ref))
+        out = _parse_time_output(run_reindex(ref, args['dbcache']))
         print("Finished {}: {}".format(ref, out))
         outd[ref] = out
 
@@ -64,23 +65,24 @@ def _parse_time_output(outd):
 
 
 def run_getblocks():
+    """Unused."""
     r = run('/usr/bin/time -v ./src/bitcoind -stopatheight=550000 -dbcache=7000 -printtoconsole=0')
     outlines = [i.strip() for i in r.stderr.decode().splitlines()]
     return dict(i.split(': ') for i in outlines)
 
 
-def run_reindex(ref):
+def run_reindex(ref, dbcache):
     runmany(f"""
         git checkout {ref}
-        make clean && make -j 4
+        make clean && make -j $(nproc --ignore=1)
     """)
     run(
         'sync; sudo /sbin/swapoff -a; sudo /sbin/sysctl vm.drop_caches=3; '
         'sudo /usr/local/bin/pyperf system tune; ',
-        check=False,
     )
     r = run(
-        '/usr/bin/time -v ./src/bitcoind -reindex-chainstate -stopatheight=550000 -dbcache=5000 -connect=0')
+        f'/usr/bin/time -v ./src/bitcoind -reindex-chainstate -stopatheight=550000 '
+        f'-dbcache={dbcache} -connect=0')
     outlines = [i.strip() for i in r.stderr.decode().splitlines()]
     return dict(i.split(': ') for i in outlines)
 
@@ -92,7 +94,7 @@ def install_pyperf():
     """)
 
 
-def run_on_host(router, hostname, count):
+def run_on_host(router, hostname, count, args):
     outd = {}
     print('Running on host {}'.format(hostname))
 
@@ -106,7 +108,7 @@ def run_on_host(router, hostname, count):
                          **creds,
                          )
 
-    outd[hostname] = context.call(bench, count)
+    outd[hostname] = context.call(bench, count, args)
     print('Completed bench on host {}'.format(hostname))
     # context.call(install_pyperf)
 
@@ -115,6 +117,11 @@ def run_on_host(router, hostname, count):
 
 @mitogen.main()
 def main(router):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('hosts', nargs='+')
+    parser.add_argument('--dbcache', type=int, default=4000)
+    args = vars(parser.parse_args())
+
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
@@ -123,8 +130,9 @@ def main(router):
     hostname_to_results = {}
 
     with Pool(10) as p:
-        for i, hostname in enumerate(sys.argv[1:]):
-            results.append(p.apply_async(run_on_host, (router, hostname, i)))
+        for i, hostname in enumerate(args['hosts']):
+            results.append(p.apply_async(
+                run_on_host, (router, hostname, i, args)))
 
         p.close()
         p.join()
