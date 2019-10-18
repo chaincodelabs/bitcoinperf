@@ -143,12 +143,14 @@ class Command:
 
                     sh(327)───time(334)───bitcoind(335)
                 """
+                name = proc_.name()
+
                 # Recurse into child processes if need be.
-                if proc_.name() in ['sh', 'time']:
+                if name in ['sh', 'time']:
                     assert len(proc_.children()) == 1
                     return find_process(proc_.children()[0])
 
-                assert proc_.name().startswith('bitcoin')
+                assert (name.startswith('bitcoin') or name.startswith('b-'))
                 return proc_
 
             proc = find_process(proc)
