@@ -18,6 +18,7 @@ setup(
     entry_points={
         'console_scripts': [
             'bitcoinperf = runner.main:main',
+            'bitcoinperf-hwinfo = runner.hwinfo:main',
         ],
     },
 )

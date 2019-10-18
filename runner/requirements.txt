@@ -5,3 +5,4 @@ numpy
 matplotlib
 pyyaml
 pydantic
+distro==1.4.0
