@@ -1,0 +1,15 @@
+language: minimal
+arch:
+ - arm64
+ - amd64
+env:
+  global:
+  - DOCKER_NAME_TAG=ubuntu:19.10  # Use docker only to pin to a specific version of an OS
+install:
+    - travis_retry docker pull "$DOCKER_NAME_TAG"
+    - DOCKER_ID=$(docker run -idt --mount type=bind,src=$TRAVIS_BUILD_DIR,dst=$TRAVIS_BUILD_DIR $DOCKER_NAME_TAG)
+    - DOCKER_EXEC () { docker exec $DOCKER_ID bash -c "cd $PWD && $*"; }
+    - DOCKER_EXEC runner/provision
+    - DOCKER_EXEC python3 -m pip install --user -e .
+script:
+    - travis_wait 40 DOCKER_EXEC \~/.local/bin/bitcoinperf examples/travis.yml

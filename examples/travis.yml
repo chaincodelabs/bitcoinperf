@@ -1,0 +1,28 @@
+---
+
+# Cache a built bitcoin src directory and restore it from the cache on
+# subsequent runs.
+cache_build: true
+
+# If true, the first git clone will be cached and copied from as necessary.
+cache_git: true
+
+# Set to false to disable cache dropping and various safety checks.
+safety_checks: false
+
+compilers:
+  - clang
+
+benches:
+  build:
+    num_jobs: 3
+
+to_bench:
+
+  - gitref: 'deb2327b435925c6a39ca654a79283b8eb6aeb86'
+    rebase: false
+    configure_args: '--enable-fuzz --with-sanitizers=fuzzer,address'
+
+  - gitref: '8f14d2002b114195fccfe8479a70e323c5f3aa09'
+    rebase: false
+    configure_args: '--enable-fuzz --with-sanitizers=fuzzer,address'
