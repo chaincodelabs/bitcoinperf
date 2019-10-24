@@ -9,6 +9,5 @@ install:
     - DOCKER_ID=$(docker run -idt --mount type=bind,src=$TRAVIS_BUILD_DIR,dst=$TRAVIS_BUILD_DIR $DOCKER_NAME_TAG)
     - DOCKER_EXEC () { docker exec $DOCKER_ID bash -c "cd $PWD && $*"; }
     - DOCKER_EXEC ./bin/install.sh
-    - DOCKER_EXEC python3 -m pip install --user -e .
 script:
     - travis_wait 40 DOCKER_EXEC \~/.local/bin/bitcoinperf examples/travis.yml
