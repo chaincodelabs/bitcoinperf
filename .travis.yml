@@ -1,6 +1,5 @@
 language: minimal
 arch:
- - arm64
  - amd64
 env:
   global:
