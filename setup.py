@@ -7,7 +7,7 @@ namespace = {}
 setup(
     name='bitcoinperf',
     version='0.0.1',
-    description="Bitcoin performance benchmarking tools",
+    description="Bitcoin Core performance benchmarking tools",
     author='jamesob',
     author_email='jamesob@chaincode.com',
     py_modules=['runner'],
