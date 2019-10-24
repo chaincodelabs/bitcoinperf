@@ -16,13 +16,12 @@ compilers:
 benches:
   build:
     num_jobs: 3
+    configure_args: '--enable-fuzz --with-sanitizers=fuzzer,address'
 
 to_bench:
 
   - gitref: 'deb2327b435925c6a39ca654a79283b8eb6aeb86'
     rebase: false
-    configure_args: '--enable-fuzz --with-sanitizers=fuzzer,address'
 
   - gitref: '8f14d2002b114195fccfe8479a70e323c5f3aa09'
     rebase: false
-    configure_args: '--enable-fuzz --with-sanitizers=fuzzer,address'
