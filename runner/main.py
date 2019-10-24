@@ -6,6 +6,7 @@ Run a series of benchmarks against a particular Bitcoin Core revision(s).
 See bin/runlocal.sh for a sample invocation.
 
 """
+import argparse
 import atexit
 import os
 import datetime
@@ -185,7 +186,15 @@ def _stash_debug_file(cfg: config.Config):
 
 
 def main():
-    arg = sys.argv[1]
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        'yaml_or_pickle_path',
+        help=(
+            'path to configuration file (YAML) or a results file (pickle). '
+            'See examples/.'))
+
+    args = parser.parse_args()
+    arg = args.yaml_or_pickle_path
     cfg = None
 
     if arg.endswith('yml') or arg.endswith('yaml'):
