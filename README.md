@@ -33,7 +33,13 @@ codespeed instance.
 You must have Python 3.7 or greater installed.
 
 ```sh
+# Obtain all the dependencies necessary to build Bitcoin Core as well as all additional dependencies
+runner/provision
 python3.7 -m pip install --user -e .
+# If pip warns that the installation path is not in PATH, add it
+export PATH=$PATH:~/.local/bin
+
+# To run:
 # bitcoinperf [path to YAML config file]
 bitcoinperf examples/pr_compare.yml
 ```

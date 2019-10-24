@@ -160,6 +160,7 @@ class Bench(BaseModel):
 
 class BenchBuild(Bench):
     num_jobs: t.Op[PositiveInt] = DEFAULT_NPROC
+    configure_args: EnvStr = ""
 
 
 class BenchUnittests(Bench):
@@ -232,7 +233,6 @@ class Target(BaseModel):
     gitref: EnvStr
     gitremote: EnvStr = "origin"
     bitcoind_extra_args: EnvStr = ""
-    configure_args: EnvStr = ""
 
     # Used for display in output.
     name: EnvStr = ""
@@ -255,7 +255,7 @@ class Target(BaseModel):
     def __hash__(self):
         return hash(
             self.gitref + self.gitremote + self.bitcoind_extra_args +
-            self.configure_args + self.name)
+            self.name)
 
 
 class Compilers(str, Enum):
