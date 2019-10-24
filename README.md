@@ -33,9 +33,13 @@ codespeed instance.
 You must have Python 3.7 or greater installed.
 
 ```sh
-# Obtain all the dependencies necessary to build Bitcoin Core as well as all additional dependencies
-runner/provision
-python3.7 -m pip install --user -e .
+# Obtain all the dependencies necessary to build Bitcoin Core as well as all
+# additional dependencies.
+#
+# This script is written for Debian-like systems - if you're not on one of
+# those, take a look at the script. It should be pretty obvious what you need to
+# do.
+./bin/install.sh
 # If pip warns that the installation path is not in PATH, add it
 export PATH=$PATH:~/.local/bin
 

@@ -1,6 +1,6 @@
 FROM python:3.7-stretch
 
-COPY runner/provision /usr/bin/provision
+COPY ./bin/install.sh /usr/bin/provision
 RUN /usr/bin/provision
 RUN git clone -b v0.18.0 https://github.com/bitcoin/bitcoin.git /bitcoin
 WORKDIR /bitcoin
