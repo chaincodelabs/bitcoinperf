@@ -21,9 +21,15 @@ from fscm import run, runmany
 def bench(count, args):
     outd = {}
     to_bench = [
-        'jamesob/2019-08-robinhood',
+        # 'martinus/2019-09-SaltedOutpointHasher-noexcept',
+        # 'jamesob/2019-08-robinhood',
+
+        # This is the unmodified robinhood impl. (with its hash mixin)
+        # '6f9882ce4a817c9f14aa7526165ab6e278de890e',
+
         'master',
-        'martinus/2019-08-bulkpoolallocator',
+        # 'martinus/2019-08-bulkpoolallocator',
+        'martinus/2019-09-more-compact-Coin',
     ]
 
     perms = itertools.cycle(itertools.permutations(to_bench))
@@ -78,7 +84,7 @@ def run_reindex(ref, dbcache):
     """)
     run(
         'sync; sudo /sbin/swapoff -a; sudo /sbin/sysctl vm.drop_caches=3; '
-        'sudo /usr/local/bin/pyperf system tune; ',
+        'sudo /usr/local/bin/pyperf system tune; ', check=False,
     )
     r = run(
         f'/usr/bin/time -v ./src/bitcoind -reindex-chainstate -stopatheight=550000 '
