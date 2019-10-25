@@ -7,7 +7,6 @@ import shutil
 import glob
 import typing as t
 from pathlib import Path
-from dataclasses import dataclass, field
 
 from . import bitcoind, results, sh, config, git
 from .globals import G
@@ -320,6 +319,23 @@ class IbdBench(Benchmark):
         last_height_seen = starting_height
         last_resource_usage = None
         start_time = None
+
+        if self.server_node:
+            server_blockchaininfo = self.server_node.call_rpc(
+                'getblockchaininfo')
+            client_blockchaininfo = self.client_node.call_rpc(
+                'getblockchaininfo')
+            server_blocks = server_blockchaininfo['blocks']
+            client_headers = client_blockchaininfo['headers']
+
+            if server_blocks <= client_headers:
+                raise RuntimeError(
+                    ("Server blocks ({}) must be greater than client headers "
+                     "({}) otherwise the IBD will stall since the server "
+                     "cannot report a connected block better than the "
+                     "client's existing header chain. "
+                     "Sync the server's datadir to a height past {}."
+                     ).format(server_blocks, client_headers, client_headers))
 
         extra_data = {
             'start_height': bench_cfg.start_height,
