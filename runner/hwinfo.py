@@ -78,7 +78,7 @@ def get_hwinfo():
         os=list(distro.linux_distribution()),
         arch=platform.machine(),
         kernel=platform.uname().release,
-        disk=get_disk_iops([Path('/tmp'), Path('/data')]),
+        disk=get_disk_iops([Path('/tmp'), Path('.')]),
     )
 
 
