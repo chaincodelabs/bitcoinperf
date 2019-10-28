@@ -1,7 +1,9 @@
 """
-Routines for gathering stuctured information on the hardware.
+Routines for gathering stuctured information on hardware being used by
+bitcoinperf.
 """
 
+import argparse
 import os
 import platform
 import subprocess
@@ -40,9 +42,14 @@ def get_disk_iops(locations=None):
         cmd = (
             "fio --randrepeat=1 --ioengine=libaio --direct=1 --gtod_reduce=1 "
             f"--name=test --filename={filename} --bs=4k "
-            "--iodepth=64 --size=90M --readwrite=randrw --rwmixread=75")
+            "--iodepth=64 --size=180M --time_based=1 --runtime=20 --readwrite=randrw --rwmixread=75")
 
-        res = subprocess.run(cmd.split(), check=True, capture_output=True)
+        res = subprocess.run(cmd.split(), capture_output=True)
+
+        if res.returncode != 0:
+            print("Fio command (`{}`) failed ({}): {}".format(
+                ' '.join(res.args), res.returncode, res.stdout,
+            ))
 
         for line in (i.decode().strip() for i in res.stdout.splitlines()):
             if line.startswith('read'):
@@ -70,7 +77,9 @@ def get_processor_name():
     return ""
 
 
-def get_hwinfo():
+def get_hwinfo(datadir_path: str):
+    paths_for_io = [Path('/tmp'), Path(datadir_path or '.')]
+
     return dict(
         hostname=socket.gethostname(),
         cpu_model_name=get_processor_name(),
@@ -78,19 +87,22 @@ def get_hwinfo():
         os=list(distro.linux_distribution()),
         arch=platform.machine(),
         kernel=platform.uname().release,
-        disk=get_disk_iops([Path('/tmp'), Path('.')]),
+        disk=get_disk_iops(paths_for_io),
     )
 
 
 def main():
-    argv = set(sys.argv)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--json', type=bool, default=False)
+    parser.add_argument(
+        '--datadir', type=str, default='',
+        help='Specify the datadir location to give accurate disk IO measure.')
+    args = parser.parse_args()
 
-    if argv & {'--help', '-h'}:
-        print("Usage: bitcoinperf-hwinfo [--json]")
-    elif argv & {'--json'}:
-        print(json.dumps(get_hwinfo()))
+    if args.json:
+        print(json.dumps(get_hwinfo(args.datadir)))
     else:
-        info = get_hwinfo()
+        info = get_hwinfo(args.datadir)
         disk_info = info.pop('disk')
 
         for k, v in info.items():
