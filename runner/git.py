@@ -52,7 +52,7 @@ def checkout_in_dir(
         sh.run("git remote add {} https://github.com/{}/bitcoin.git"
                .format(new_remote, new_remote),
                check_returncode=False)
-        sh.run("git fetch {}".format(new_remote))
+    sh.run('git fetch --all')
 
     sh.run("git checkout origin/master".format(new_remote))
     # Delete the branch if it exists - might be old
