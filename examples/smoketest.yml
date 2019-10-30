@@ -7,7 +7,7 @@ cache_build: true
 # If true, the first git clone will be cached and copied from as necessary.
 cache_git: true
 
-# Set to false to disable cache dropping and various safety checks.
+# Set to false to make cache dropping optional and bypass various safety checks.
 safety_checks: false
 
 
