@@ -276,7 +276,6 @@ class Config(BaseModel):
     teardown: bool = True
     safety_checks: bool = True
     clean: bool = True
-    drop_caches: bool = True
     cache_build: bool = False
     cache_git: bool = False
     cache_build_size: int = 5

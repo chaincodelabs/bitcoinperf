@@ -64,8 +64,7 @@ class Benchmark(abc.ABC):
 
     def wrapped_run(self, cfg, bench_cfg):
         """Called externally."""
-        if cfg.safety_checks and cfg.drop_caches:
-            sh.drop_caches()
+        sh.drop_caches()
 
         G.benchmark = self.__class__
 
@@ -124,7 +123,6 @@ class Build(Benchmark):
 
         logger.info("Building db4")
         sh.run("./contrib/install_db4.sh .")
-
         sh.run("./autogen.sh")
 
         configure_prefix = ''
@@ -234,8 +232,7 @@ class Microbench(Benchmark):
 
     def _run(self, cfg, bench_cfg):
         time_start = time.time()
-        if cfg.safety_checks and cfg.drop_caches:
-            sh.drop_caches()
+        sh.drop_caches()
         cmd_str = "./src/bench/bench_bitcoin"
 
         if bench_cfg.filter:
