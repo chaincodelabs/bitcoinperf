@@ -328,6 +328,14 @@ class IbdBench(Benchmark):
             server_blocks = server_blockchaininfo['blocks']
             client_headers = client_blockchaininfo['headers']
 
+            if server_blocks < bench_cfg.end_height:
+                raise RuntimeError(
+                    ("Server blocks ({}) must be greater than end height "
+                     "({}) otherwise the IBD will stall. "
+                     "Sync the server's datadir to a height past {}."
+                     ).format(server_blocks, bench_cfg.end_height,
+                              bench_cfg.end_height))
+
             if server_blocks <= client_headers:
                 raise RuntimeError(
                     ("Server blocks ({}) must be greater than client headers "
