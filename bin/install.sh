@@ -5,7 +5,7 @@ if ! which apt >/dev/null; then
 fi
 
 SUDO="sudo "
-if [ -f /.dockerenv ]; then
+if [ "$container" == "docker" -o "$container" == "podman" ]; then
   # No sudo on docker.
   SUDO=""
 fi
