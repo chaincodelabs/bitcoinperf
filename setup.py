@@ -19,6 +19,7 @@ setup(
         'console_scripts': [
             'bitcoinperf = runner.main:main',
             'bitcoinperf-hwinfo = runner.hwinfo:main',
+            'bitcoinperf-perf-check = runner.perftools:perf_check_cli',
         ],
     },
 )
