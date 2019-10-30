@@ -14,6 +14,8 @@ import re
 import sys
 from pathlib import Path
 
+from .util import md_table
+
 import psutil
 
 _SYS = platform.system()
@@ -23,7 +25,6 @@ def get_disk_iops(locations=None):
     """
     Use fio to get disk iops for a certain location, probably a datadir.
     """
-    locations = locations or [Path('/tmp')]
     out = {}
 
     if subprocess.run('fio --version >/dev/null', shell=True).returncode != 0:
@@ -77,10 +78,9 @@ def get_processor_name():
     return ""
 
 
-def get_hwinfo(datadir_path: str):
-    paths_for_io = [Path('/tmp'), Path(datadir_path or '.')]
-
-    return dict(
+def get_hwinfo(datadir_path: str, srcdir_path: str):
+    paths_for_io = [Path(datadir_path or os.getcwd())]
+    out_dict = dict(
         hostname=socket.gethostname(),
         cpu_model_name=get_processor_name(),
         ram_gb=(psutil.virtual_memory().total / (1024**3)),
@@ -90,6 +90,58 @@ def get_hwinfo(datadir_path: str):
         disk=get_disk_iops(paths_for_io),
     )
 
+    if srcdir_path:
+        out_dict.update(parse_configure_log(srcdir_path))
+
+    return out_dict
+
+
+def parse_configure_log(src_dir_path: str) -> dict:
+    """
+    Inspect the config.log file from the bitcoin src dir.
+    """
+    out = {
+        'configure_command': '',
+        'clang_version': '',
+        'gcc_version': '',
+        'cxx': '',
+        'cxxflags': '',
+    }
+    configlog = Path(Path(src_dir_path) / 'config.log')
+    if not configlog.is_file():
+        print("No config.log found at %s", configlog)
+
+    lines = configlog.read_text().splitlines()
+
+    def extract_val(line) -> str:
+        return line.split('=', 1)[-1].replace("'", '')
+
+    for line in lines:
+        if line.startswith("  $") and 'configure ' in line:
+            out['configure_command'] = line.strip('  $')
+
+        elif line.startswith('clang version'):
+            out['clang_version'] = line
+
+        elif line.startswith('g++ '):
+            out['gcc_version'] = line
+
+        elif line.startswith('CXX='):
+            out['cxx'] = extract_val(line)
+
+        elif line.startswith('CXXFLAGS='):
+            out['cxxflags'] += extract_val(line)
+
+        elif '_CXXFLAGS=' in line:
+            val = extract_val(line)
+            if val:
+                out['cxxflags'] += val + ' '
+
+    for key in ('cxx', 'configure_command', 'cxxflags'):
+        out[key] = '`' + out[key].strip() + '`'
+
+    return out
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -97,21 +149,26 @@ def main():
     parser.add_argument(
         '--datadir', type=str, default='',
         help='Specify the datadir location to give accurate disk IO measure.')
+    parser.add_argument(
+        '--srcdir', type=str, default='',
+        help='Specify the source dir location to give compiler info.')
     args = parser.parse_args()
 
-    if args.json:
-        print(json.dumps(get_hwinfo(args.datadir)))
-    else:
-        info = get_hwinfo(args.datadir)
-        disk_info = info.pop('disk')
+    get_hw_args = [args.datadir, args.srcdir]
 
-        for k, v in info.items():
-            print(f"{k:<22} {str(v):<20}")
+    if args.json:
+        print(json.dumps(get_hwinfo(*get_hw_args)))
+    else:
+        info = get_hwinfo(*get_hw_args)
+        disk_info = info.pop('disk')
+        print_list = []
+        print_list.extend(list(info.items()))
 
         for disk, d in disk_info.items():
             for k, v in d.items():
-                name = f'{k} ({disk})'
-                print(f"{name:<22} {v}")
+                print_list.append((f'{k} ({disk})', v))
+
+        print(md_table(('key', 'value'), print_list))
 
     sys.exit(0)
 
