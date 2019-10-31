@@ -27,7 +27,7 @@ benches:
     num_jobs: 4
 
   microbench:
-    num_jobs: 4
+    enabled: true
 
   ibd_range_from_local:
     run_count: 3
