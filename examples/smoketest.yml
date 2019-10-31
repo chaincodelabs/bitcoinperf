@@ -44,7 +44,6 @@ benches:
     num_jobs: 4
 
   microbench:
-    num_jobs: 4
     filter: SHA.*|M.*
 
   ibd_from_network:

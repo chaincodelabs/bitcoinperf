@@ -29,7 +29,7 @@ benches:
     num_jobs: 1
 
   microbench:
-    num_jobs: 1
+    enabled: true
 
   ibd_from_local:
     run_count: 1

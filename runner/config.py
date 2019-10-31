@@ -172,7 +172,6 @@ class BenchFunctests(Bench):
 
 
 class BenchMicrobench(Bench):
-    num_jobs: t.Op[PositiveInt] = DEFAULT_NPROC
     filter: str = ''
 
 
