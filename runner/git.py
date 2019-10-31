@@ -47,6 +47,9 @@ def checkout_in_dir(
         shutil.copytree(git_path, git_cache_path)
 
     os.chdir(git_path)
+    sh.run('echo \'[remote "upstream-pull"]\'                                  >> .git/config')
+    sh.run('echo \'        fetch = +refs/pull/*:refs/remotes/upstream-pull/*\' >> .git/config')
+    sh.run('echo \'        url = https://github.com/bitcoin/bitcoin\'          >> .git/config')
     new_remote = target.gitremote
     if new_remote:
         sh.run("git remote add {} https://github.com/{}/bitcoin.git"
