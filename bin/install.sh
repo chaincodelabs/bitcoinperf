@@ -39,6 +39,11 @@ if ! which python3.7; then
   $SUDO rm -rf /tmp/Python-3.7.3*
 fi
 
+if ! which fio; then
+  echo "Installing fio for IO testing (bitcoinperf-hwinfo)"
+  $SUDO apt install -y -qq fio
+fi
+
 if [ -f "./setup.py" ]; then
   python3.7 -m pip install --user -e .
 fi
