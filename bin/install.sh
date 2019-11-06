@@ -4,10 +4,9 @@ if ! which apt >/dev/null; then
   echo "Requires debian-like system"
 fi
 
-SUDO="sudo "
-if [ -f /.dockerenv ]; then
-  # No sudo on docker.
-  SUDO=""
+SUDO=""
+if which sudo > /dev/null; then
+  SUDO="sudo "
 fi
 
 echo "Installing bitcoin core dependencies"

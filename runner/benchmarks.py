@@ -227,7 +227,7 @@ class FunctionalTests(Benchmark):
 
 class Microbench(Benchmark):
     name = 'microbench'
-    id_format = 'micro.{G.compiler}.j={bench_cfg.num_jobs}'
+    id_format = 'micro.{G.compiler}'
     _results_class = results.MicrobenchResults
 
     def _run(self, cfg, bench_cfg):

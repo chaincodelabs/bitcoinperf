@@ -52,7 +52,7 @@ def checkout_in_dir(
         sh.run("git remote add {} https://github.com/{}/bitcoin.git"
                .format(new_remote, new_remote),
                check_returncode=False)
-        sh.run("git fetch {}".format(new_remote))
+    sh.run('git fetch --all')
 
     sh.run("git checkout origin/master".format(new_remote))
     # Delete the branch if it exists - might be old
@@ -68,8 +68,8 @@ def checkout_in_dir(
     sh.run("git config user.email 'bench@bitcoinperf.com'")
     sh.run("git config user.name 'Bitcoinperf'")
     if target.gitref not in ('master', 'origin/master') and target.rebase:
-        sh.run('git rebase origin/master')
-        logger.info("Rebased %s (%s) onto master (%s)",
+        sh.run('git merge origin/master')
+        logger.info("Merged %s (%s) with master (%s)",
                     target.gitref, gitsha, get_sha('origin/master'))
 
     co = GitCheckout(
