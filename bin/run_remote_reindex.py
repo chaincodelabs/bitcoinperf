@@ -102,9 +102,8 @@ def run_reindex(ref, dbcache):
         check=False,
     )
     r = run(
-        # f'/usr/bin/time -v ./src/bitcoind -reindex-chainstate -stopatheight=550000 '
-        # f'-dbcache={dbcache} -connect=0')
-        '/usr/bin/time -v echo foo')
+        f'/usr/bin/time -v ./src/bitcoind -reindex-chainstate -stopatheight=550000 '
+        f'-dbcache={dbcache} -connect=0')
     outlines = [i.strip() for i in r.stderr.decode().splitlines()]
     return dict(i.split(': ') for i in outlines)
 
