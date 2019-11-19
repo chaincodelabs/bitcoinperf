@@ -1,9 +1,7 @@
-language: minimal
+language: shell
+os: linux
 arch:
  - amd64
-env:
-  global:
-  - DOCKER_NAME_TAG=ubuntu:19.10  # Use docker only to pin to a specific version of an OS
 install:
     - travis_retry docker pull "$DOCKER_NAME_TAG"
     - DOCKER_ID=$(docker run -idt --mount type=bind,src=$TRAVIS_BUILD_DIR,dst=$TRAVIS_BUILD_DIR $DOCKER_NAME_TAG)
@@ -11,3 +9,22 @@ install:
     - DOCKER_EXEC ./bin/install.sh
 script:
     - travis_wait 40 DOCKER_EXEC \~/.local/bin/bitcoinperf examples/travis.yml
+
+
+jobs:
+ include:
+  - env:
+    - DOCKER_NAME_TAG=ubuntu:19.10  # Use docker only to pin to a specific version of an OS
+
+
+  - os: windows
+    install:
+      - choco install python --version=3.7.5
+      - choco install wget
+      - export PYTHON="C:\Python37\python"
+      - powershell "${PYTHON} --version"
+      - powershell "${PYTHON} -m pip install -e ."
+    script:
+      - powershell "${PYTHON} --version"
+      - powershell '${PYTHON} -m bitcoinperf examples/travis.yml'
+      - travis_wait 40 DOCKER_EXEC \~/.local/bin/bitcoinperf examples/travis.yml
