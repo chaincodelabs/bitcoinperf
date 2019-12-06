@@ -60,7 +60,7 @@ def checkout_in_dir(
         sh.run("git branch -D {}".format(target.gitref),
                check_returncode=False)
     sh.run("git fetch --all")
-    sh.run("git checkout {}".format(target.gitref))
+    sh.run("git checkout {}/{}".format(target.gitremote, target.gitref))
     sh.run("git pull {} {}".format(target.gitremote, target.gitref))
 
     gitsha = get_sha('HEAD')
