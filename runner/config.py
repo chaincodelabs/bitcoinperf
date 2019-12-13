@@ -290,8 +290,7 @@ class Config(BaseModel):
 
     @validator('benches', whole=True)
     def check_peer(cls, v, values, **kwargs):
-        if v.ibd_from_network or v.ibd_from_local or v.ibd_range_from_local \
-                or v.reindex or v.reindex_chainstate:
+        if v.ibd_from_local or v.ibd_range_from_local:
             if not values.get('synced_peer'):
                 raise ValueError(
                     "synced_peer must be specified when running "
