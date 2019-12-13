@@ -49,32 +49,50 @@ def checkout_in_dir(
     os.chdir(git_path)
     new_remote = target.gitremote
     if new_remote:
-        sh.run("git remote add {} https://github.com/{}/bitcoin.git"
-               .format(new_remote, new_remote),
-               check_returncode=False)
-    sh.run('git fetch --all')
+        if new_remote.startswith('https://'):
+            shortname = new_remote.split('.git')[0].split('/')[-1]
+            cmd = f"git remote add {shortname} {new_remote}"
+        else:
+            cmd = (
+                f"git remote add {new_remote} "
+                f"https://github.com/{new_remote}/bitcoin.git")
 
-    sh.run("git checkout origin/master".format(new_remote))
+        sh.run(cmd, check_returncode=False)
+
+    sh.run('git fetch --all')
+    sh.run("git checkout origin/master")
     # Delete the branch if it exists - might be old
     if target.gitref != 'origin/master':
         sh.run("git branch -D {}".format(target.gitref),
                check_returncode=False)
-    sh.run("git fetch --all")
-    sh.run("git checkout {}/{}".format(target.gitremote, target.gitref))
-    sh.run("git pull {} {}".format(target.gitremote, target.gitref))
+    sh.run("git fetch --all --tags")
 
-    gitsha = get_sha('HEAD')
+    if target.rebase:
+        sh.run("git checkout {}/{}".format(target.gitremote, target.gitref))
 
-    sh.run("git config user.email 'bench@bitcoinperf.com'")
-    sh.run("git config user.name 'Bitcoinperf'")
-    if target.gitref not in ('master', 'origin/master') and target.rebase:
-        sh.run('git merge origin/master')
-        logger.info("Merged %s (%s) with master (%s)",
-                    target.gitref, gitsha, get_sha('origin/master'))
+        gitsha = get_sha('HEAD')
 
-    co = GitCheckout(
-        ref=target.gitref, sha=gitsha, commit_msg=get_commit_msg('HEAD'))
-    logger.info("Checked out {}".format(co))
+        sh.run("git config user.email 'bench@bitcoinperf.com'")
+        sh.run("git config user.name 'Bitcoinperf'")
+        if target.gitref != 'master':
+            sh.run('git rebase origin/master')
+            logger.info("Rebased %s (%s) on top of master (%s)",
+                        target.gitref, gitsha, get_sha('origin/master'))
+
+        co = GitCheckout(
+            ref=target.gitref, sha=gitsha, commit_msg=get_commit_msg('HEAD'))
+        logger.info("Checked out {}".format(co))
+
+    # Special case which does no rebase; allows for specifying commit hashes
+    # to be tested.
+    else:
+        sh.run("git checkout {}".format(target.gitref))
+        gitsha = get_sha('HEAD')
+        co = GitCheckout(
+            ref=target.gitref, sha=gitsha, commit_msg=get_commit_msg('HEAD'))
+        logger.info("Checked out {}".format(co))
+
+
 
     return co
 
