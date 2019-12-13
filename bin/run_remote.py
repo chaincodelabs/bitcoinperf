@@ -79,7 +79,12 @@ def get_branch_list(seed: int, branches: list):
 
 
 def checkout_and_build(ref):
+    # ac831339cb is an arbitrary commit known to exist in master. We
+    # check that out temporarily to avoid switching to whichever branch
+    # we'd be deleting.
     runmany(f"""
+        git checkout ac831339cb
+        git branch -D {ref} || true
         git checkout {ref}
         make clean && make -j $(nproc --ignore=1)
     """)
@@ -105,8 +110,10 @@ def run_reindex(seed, args):
         # 'bench/alloc.1',
         # 'bench/robinhood.1',
         # 'bench/au.1',
-        'b4a1da9ef8e4b673c290d5b882527e627ae1b43a',
-        'laanwj/2019_11_prevector',
+        # 'b4a1da9ef8e4b673c290d5b882527e627ae1b43a',
+        # 'laanwj/2019_11_prevector',
+        '2019-12-partial-flush',
+        'e354db787790b84b0b3f34cc55b65446c71e4fa2', # base of partial-flush
     ]
 
     outd = {}
@@ -147,8 +154,10 @@ def _parse_time_output(outd):
 def run_au(seed, args):
     """Time syncing to tip from loading a 600k UTXO snapshot."""
     branches = [
-        'utxo-dumpload-compressed',
-        'bench/au.no-erase',
+        # 'utxo-dumpload-compressed',
+        'utxo-dumpload.54',
+        # 'bench/au.no-erase',
+        'bench/au.no-erase.1',
     ]
 
     outd = {}
@@ -160,7 +169,7 @@ def run_au(seed, args):
     for ref in bench_order:
         checkout_and_build(ref)
         stop_block = 604_667
-        dbcache = 5000
+        dbcache = args.get('dbcache', 5000)
         # This was downloaded manually beforehand.
         snapshot_path = '/tmp/utxo.dat'
         datadir = '/tmp/utxo-datadir'
@@ -233,6 +242,7 @@ def main(router):
     parser_au = subparsers.add_parser(
         'au', help='run an assumeutxo sync benchmark')
     parser_au.add_argument('--hosts', nargs='+')
+    parser_au.add_argument('--dbcache', type=int, default=5000)
     parser_au.set_defaults(funcname='au')
 
     parser_cmd = subparsers.add_parser(
