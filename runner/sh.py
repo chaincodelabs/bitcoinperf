@@ -14,7 +14,7 @@ logger = logging.getLogger('bitcoinperf')
 
 
 def drop_caches():
-    ret = run("sync; sudo /sbin/swapoff -a;", check_returncode=False)
+    ret = run("sync; sudo -n /sbin/swapoff -a;", check_returncode=False)
 
     if ret[-1] != 0:
         # Don't log as harshly about this because disabling swap isn't as
@@ -25,7 +25,7 @@ def drop_caches():
 
     # N.B.: the host sudoer file needs to be configured to allow non-superusers
     # to run this command. See: https://unix.stackexchange.com/a/168670
-    ret2 = run("sudo /sbin/sysctl vm.drop_caches=3", check_returncode=False)
+    ret2 = run("sudo -n /sbin/sysctl vm.drop_caches=3", check_returncode=False)
 
     if ret2[-1] != 0:
         logger.warning(

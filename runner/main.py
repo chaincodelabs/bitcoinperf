@@ -51,7 +51,7 @@ def _startup_assertions(cfg):
              "processes")
 
     if cfg.safety_checks:
-        run('sudo swapoff -a')
+        run('sudo -n swapoff -a')
 
     if run('cat /proc/swaps | grep -v "^Filename"',
             check_returncode=False)[2] != 1:
