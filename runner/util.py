@@ -6,10 +6,12 @@ def md_table(headers, values) -> str:
     """
     out = ''
     col_lengths = [0] * len(headers)
+    MAX_COL_WIDTH = 60
 
     for row in tuple([headers]) + tuple(values):
         for i, val in enumerate(row):
-            col_lengths[i] = max(len(str(val)), col_lengths[i])
+            col_lengths[i] = min(max(len(str(val)), col_lengths[i]),
+                                 MAX_COL_WIDTH)
 
     row_fmt = '|' + ''.join(' {' + str(i) + ':<' + str(collen + 2) + '} |'
                             for i, collen in enumerate(col_lengths)) + '\n'
