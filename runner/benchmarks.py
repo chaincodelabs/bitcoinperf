@@ -19,6 +19,13 @@ logger = get_logger()
 
 class Benchmark(abc.ABC):
     name: str = ""
+
+    # Each benchmark has a `Results` class associated with it that indicates
+    # what data the benchmark run will generate. These classes are defined
+    # in the `runner.results` module.
+    #
+    # This type is used to instantiate `self.results`, which should be filled
+    # out during bench runtime.
     _results_class: t.Type[results.Results] = results.Results
 
     def __init__(self,
@@ -37,6 +44,10 @@ class Benchmark(abc.ABC):
 
         # Each subclass must define a Results class, which defines the schema
         # of result data that the bench run will yield.
+        #
+        # This result data is cached in-memory and retained with each
+        # `Benchmark` instance for post-processing in the `runner.output`
+        # module.
         self.results = self._results_class()
 
     def __getstate__(self):
@@ -142,7 +153,7 @@ class Build(Benchmark):
             # otherwise configuring with clang can fail.
             boostflags = '--with-boost-libdir=%s' % armlib_path
 
-        logger.info("Running ./configure [...]")
+        logger.info("Running ./configure ...")
         sh.run(
             configure_prefix +
             './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
@@ -152,6 +163,8 @@ class Build(Benchmark):
             # are timed accurately.
             '--disable-ccache ' + boostflags)
 
+        logger.info(f"Running make -j {bench_cfg.num_jobs}")
+        self.results.command = f"make -j {bench_cfg.num_jobs}"
         self._try_execute_and_report(
             "make -j %s" % bench_cfg.num_jobs, executable='make')
 
@@ -210,9 +223,9 @@ class MakeCheck(Benchmark):
     id_format = 'makecheck.{G.compiler}.j={bench_cfg.num_jobs}'
 
     def _run(self, cfg, bench_cfg):
-        self._try_execute_and_report(
-            "make -j %s check" % (bench_cfg.num_jobs),
-            num_tries=3, executable='make')
+        cmd = f"make -j {bench_cfg.num_jobs} check"
+        self.results.command = cmd
+        self._try_execute_and_report(cmd, num_tries=3, executable='make')
 
 
 class FunctionalTests(Benchmark):
@@ -220,9 +233,10 @@ class FunctionalTests(Benchmark):
     id_format = 'functionaltests.{G.compiler}.j={bench_cfg.num_jobs}'
 
     def _run(self, cfg, bench_cfg):
+        cmd = "./test/functional/test_runner.py"
+        self.results.command = cmd
         self._try_execute_and_report(
-            "./test/functional/test_runner.py",
-            num_tries=3, executable='functional-test-runner')
+            cmd, num_tries=3, executable='functional-test-runner')
 
 
 class Microbench(Benchmark):
@@ -243,6 +257,7 @@ class Microbench(Benchmark):
         microbench_ps = popen(cmd_str)
         (microbench_stdout,
          microbench_stderr) = microbench_ps.communicate()
+        self.results.command = cmd_str
         self.results.total_time = (time.time() - time_start)
 
         if microbench_ps.returncode != 0:
@@ -316,6 +331,8 @@ class IbdBench(Benchmark):
         last_height_seen = starting_height
         last_resource_usage = None
         start_time = None
+
+        self.results.command: str = self.client_node.cmd.cmd
 
         if self.server_node:
             server_blockchaininfo = self.server_node.call_rpc(
