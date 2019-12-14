@@ -12,7 +12,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from .config import Target
+from .config import Config, Target
 from .benchmarks import Benchmark
 from .logging import get_logger
 
@@ -51,6 +51,20 @@ class BenchVal(namedtuple('BenchVal', 'name,values')):
 
 
 class BenchList(t.List[Benchmark]):
+
+    @property
+    def command(self) -> str:
+        """Get the command string associated with the first bench instance."""
+        return self.bench.results.command
+
+    @property
+    def bench(self) -> Benchmark:
+        """
+        Return the first benchmark instance. Should be characteristic,
+        and allow for looking up metadata like start height, bench_cfg params,
+        etc.
+        """
+        return self[0]
 
     def total_time_result(self) -> BenchVal:
         return BenchVal(
@@ -172,20 +186,58 @@ def get_standard_results(runs: GroupedRuns) -> FlatResults:
     return out
 
 
+def _condense_bitcoin_cmd(cmd_in: str) -> str:
+    out_str = ''
+    ignore_list = (
+        '-rpcport=', '-port=', '-datadir=', '-maxtipage=',
+        '-minimumchainwork=')
+
+    tokens = cmd_in.split()
+
+    # Always put assumevalid at the back since it's really long.
+    tokens.sort(key=lambda i: 'assumevalid' in i)
+
+    for i in tokens:
+        if i.endswith('/bitcoind'):
+            out_str += 'bitcoind '
+        elif i.startswith(ignore_list):
+            # Skip - no need to display these.
+            continue
+        else:
+            out_str += f"{i} "
+
+    return out_str.strip()
+
+
 def print_comparative_times_table(cfg, runs: GroupedRuns, pfile=sys.stdout):
-    output_path = cfg.results_dir / 'table.txt'
-    outfile = open(output_path, 'w')
-    print(file=outfile)
     writer = pytablewriter.MarkdownTableWriter()
     vs_str = ("{}" + (" vs. {}" * (len(runs.target_names) - 1))).format(
         *runs.target_names)
-    writer.table_name = vs_str + " (absolute)"
     writer.header_list = ["bench name", "x", *runs.target_names]
     writer.value_matrix = []
     writer.margin = 1
     writer.stream = pfile
 
     std_results = get_standard_results(runs)
+    important_commands = {}
+
+    for bench_name, target_to_benchlist in runs.items():
+        if 'ibd' in bench_name or 'reindex' in bench_name:
+            important_commands[bench_name] = _condense_bitcoin_cmd(
+                list(target_to_benchlist.items())[0][1].command)
+
+    cmd_writer = pytablewriter.MarkdownTableWriter()
+    cmd_writer.header_list = ["bench name", "command"]
+    cmd_writer.value_matrix = []
+    cmd_writer.margin = 1
+    cmd_writer.stream = pfile
+
+    for bench_name, command in important_commands.items():
+        cmd_writer.value_matrix.append((bench_name, f"`{command}`"))
+
+    out0 = '### commands index\n'
+    out0 += cmd_writer.dumps() + '\n\n'
+    print(out0)
 
     for bench_id, result_list in std_results.items():
         if any(not r for r in result_list):
@@ -197,10 +249,10 @@ def print_comparative_times_table(cfg, runs: GroupedRuns, pfile=sys.stdout):
             [bench_id, result_list[0].count,
              *[r.summary_str if r else '-' for r in result_list]])
 
-    writer.write_table()
-    print(file=outfile)
+    out = '### ' + vs_str + " (absolute)\n"
+    out += writer.dumps() + '\n\n'
+    print(out)
 
-    writer.table_name = vs_str + " (relative)"
     writer.value_matrix = []
 
     for bench_id, result_list in std_results.items():
@@ -212,12 +264,16 @@ def print_comparative_times_table(cfg, runs: GroupedRuns, pfile=sys.stdout):
         writer.value_matrix.append(
             [bench_id, result_list[0].count, *normrow])
 
-    writer.write_table()
-    outfile.close()
-    print(output_path.read_text())
+    out2 = '### ' + vs_str + " (relative)\n"
+    out2 += writer.dumps() + '\n\n'
+    print(out2)
+    output_path = cfg.results_dir / 'table.txt'
+    output_path.write_text(out0 + out + out2)
+    print()
+    print(f"This output has been written to {output_path}")
 
 
-def make_plots(cfg, runs: GroupedRuns):
+def make_plots(cfg: Config, runs: GroupedRuns):
     """
     Generate matplotlib output based upon bench results.
     """
@@ -247,6 +303,8 @@ def make_plots(cfg, runs: GroupedRuns):
     for bench_id in ibd_reindex_ids:
         plots_created.append(_make_ibd_type_plot(
             cfg, bench_id, runs[bench_id]))
+        plots_created.append(_make_cache_flush_plot(
+            cfg, bench_id, runs[bench_id]))
 
     if any(i.startswith('micro.') for i in runs.bench_ids):
         plots_created.append(_make_microbench_plot(cfg, runs))
@@ -272,11 +330,39 @@ def get_processor_info() -> str:
     return modelname.strip()
 
 
-def get_git_info(benches) -> str:
+def _get_git_info(benches) -> str:
     out = '\n'
     for bench in benches:
-        out += '{}: {}\n'.format(bench.target.name, bench.gitco.sha)
+        out += '{}: {}\n'.format(bench.target.name, bench.gitco.sha[:10])
     return out.rstrip()
+
+
+def _format_command(cmd: str) -> str:
+    char_count = 0
+    MAX_LEN = 70
+    out = ''
+
+    for i in _condense_bitcoin_cmd(cmd).split():
+        if 'assumevalid' in i:
+            out += f'\n    {i[:50]}...\n'
+            char_count = 0
+            continue
+
+        char_count += len(i)
+
+        if char_count >= MAX_LEN or 'assumevalid' in i:
+            out += '\n    '
+            char_count = 0
+
+        out += f'{i} '
+
+    return out
+
+
+def _get_dbcache(cmd: str) -> str:
+    for i in cmd.split():
+        if i.startswith('-dbcache='):
+            return i.split('=')[-1]
 
 
 def _make_ibd_type_plot(
@@ -302,10 +388,21 @@ def _make_ibd_type_plot(
     targets = [target for target in run_data.keys()]
     target_names = [target.name for target in targets]
 
+    # Get the plot title from the first bench command we see.
+    cmd_str: str = ''
+    title: str = ''
+
     # Benchlist per target in canonical order (due to sorted-by-default dicts)
     for target, benchlist in zip(targets, run_data.values()):
         # Ensure the data ordering is what we expect.
         assert run_data[target] == benchlist
+
+        if not cmd_str:
+            cmd_str = _format_command(benchlist[0].results.command)
+            print(benchlist[0].results.configure_info)
+
+        if not title:
+            title = benchlist[0].results.title
 
         total_time_data.append([b.results.total_time for b in benchlist])
         peak_mem_data.append(
@@ -315,11 +412,16 @@ def _make_ibd_type_plot(
     def add_iters(b, add=''):
         return b + add + " (x{})".format(num_runs)
 
+    dbcache = _get_dbcache(cmd_str)
+
+    f.suptitle(title, fontsize=12, fontfamily='sanserif')
+
     ax1.boxplot(total_time_data)
     ax1.set_title(add_iters(bench_id))
     ax1.set_xticklabels(target_names)
     ax1.set(ylabel='Seconds')
 
+    ax2.set_title('Memory')
     ax2.boxplot(peak_mem_data)
     ax2.set_title('Peak memory usage')
     ax2.set_xticklabels([i[:22] for i in target_names])
@@ -365,15 +467,98 @@ def _make_ibd_type_plot(
         mem_ax.set(ylabel='MB')
         mem_ax.legend()
 
-    plt.tight_layout(rect=[0, 0.09, 1, 1])
+    plt.tight_layout(rect=[0, 0.1, 1, 0.92])
     txt = plt.figtext(
-        0.25, 0.02,
-        "Benchmarks performed on {}{}".format(
+        0.6, 0.02,
+        "Benchmarks performed on\n{}{}".format(
             get_processor_info(),
-            get_git_info([i[0] for i in run_data.values()])))
+            _get_git_info([i[0] for i in run_data.values()])))
+    txt.set_fontfamily('sans-serif')
+
+    txt = plt.figtext(0.0, 0.02, cmd_str)
     txt.set_fontfamily('sans-serif')
 
     plot_path = "{}/{}.png".format(output_path, bench_id)
+    plt.savefig(plot_path)
+    return Path(plot_path)
+
+
+def _make_cache_flush_plot(
+    cfg, bench_id: str, run_data: t.Dict[Target, BenchList]) \
+        -> Path:
+    plt.clf()
+    output_path = cfg.results_dir / 'plots'
+
+    # The number of runs we did dictates how many IBD charts we should
+    # generate.
+    num_runs = len(list(run_data.values())[0])
+
+    f, axis_pairs = plt.subplots(num_runs, 1)
+
+    if num_runs == 1:
+        axis_pairs = [axis_pairs]
+
+    f.set_size_inches(8, 8)
+
+    total_time_data = []
+    peak_mem_data = []
+
+    targets = [target for target in run_data.keys()]
+    target_names = [target.name for target in targets]
+
+    # Get the plot title from the first bench command we see.
+    cmd_str: str = ''
+    title: str = ''
+
+    targets_to_flush_list = [{} for _ in range(num_runs)]
+
+    # Benchlist per target in canonical order (due to sorted-by-default dicts)
+    for target, benchlist in zip(targets, run_data.values()):
+        # Ensure the data ordering is what we expect.
+        assert run_data[target] == benchlist
+
+        if not cmd_str:
+            cmd_str = _format_command(benchlist[0].results.command)
+
+        if not title:
+            title = benchlist[0].results.title
+
+        for i, b in enumerate(benchlist):
+            targets_to_flush_list[i][target] = b.results.flush_events
+
+
+    def add_iters(b, add=''):
+        return b + add + " (x{})".format(num_runs)
+
+    f.suptitle('Cache flushes during\n' + title,
+               fontsize=10, fontfamily='sanserif')
+
+    for i, ax in enumerate(axis_pairs):
+        ax.set_title('Flush history (run {})'.format(i))
+
+        for target, data in targets_to_flush_list[i].items():
+            indices = [d.relative_time for d in data]
+            heights = [d.flushed_count for d in data]
+            widths = [d.duration_secs for d in data]
+            print(indices)
+            print(heights)
+            print(widths)
+            ax.bar(indices, heights, width=widths, label=target.name, alpha=0.5)
+
+        ax.set(ylabel='Coins count')
+
+    plt.tight_layout(rect=[0, 0.1, 1, 0.92])
+    txt = plt.figtext(
+        0.6, 0.02,
+        "Benchmarks performed on\n{}{}".format(
+            get_processor_info(),
+            _get_git_info([i[0] for i in run_data.values()])))
+    txt.set_fontfamily('sans-serif')
+
+    txt = plt.figtext(0.0, 0.02, cmd_str)
+    txt.set_fontfamily('sans-serif')
+
+    plot_path = "{}/{}-flush-history.png".format(output_path, bench_id)
     plt.savefig(plot_path)
     return Path(plot_path)
 
@@ -415,7 +600,7 @@ def _make_microbench_plot(cfg, runs) -> Path:
         0.2, 0.02,
         "Benchmarks performed on {}{}".format(
             get_processor_info(),
-            get_git_info([i[0] for i in list(runs.values())[0].values()])))
+            _get_git_info([i[0] for i in list(runs.values())[0].values()])))
     txt.set_fontfamily('sans-serif')
 
     plot_path = "{}/{}.png".format(output_path, 'microbenches')

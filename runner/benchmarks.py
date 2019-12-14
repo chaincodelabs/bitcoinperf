@@ -8,7 +8,7 @@ import glob
 import typing as t
 from pathlib import Path
 
-from . import bitcoind, results, sh, config, git
+from . import bitcoind, results, sh, config, git, hwinfo, logparse
 from .globals import G
 from .logging import get_logger
 from .sh import popen
@@ -165,6 +165,7 @@ class Build(Benchmark):
 
         logger.info(f"Running make -j {bench_cfg.num_jobs}")
         self.results.command = f"make -j {bench_cfg.num_jobs}"
+        self.results.title = f'Build with {G.compiler} (j={bench_cfg.num_jobs})'
         self._try_execute_and_report(
             "make -j %s" % bench_cfg.num_jobs, executable='make')
 
@@ -225,6 +226,9 @@ class MakeCheck(Benchmark):
     def _run(self, cfg, bench_cfg):
         cmd = f"make -j {bench_cfg.num_jobs} check"
         self.results.command = cmd
+        self.results.title = f'Make check (j={bench_cfg.num_jobs})'
+        self.results.configure_info = hwinfo.parse_configure_log(
+            self.cfg.workdir / 'bitcoin')
         self._try_execute_and_report(cmd, num_tries=3, executable='make')
 
 
@@ -235,6 +239,9 @@ class FunctionalTests(Benchmark):
     def _run(self, cfg, bench_cfg):
         cmd = "./test/functional/test_runner.py"
         self.results.command = cmd
+        self.results.title = 'Functional tests'
+        self.results.configure_info = hwinfo.parse_configure_log(
+            self.cfg.workdir / 'bitcoin')
         self._try_execute_and_report(
             cmd, num_tries=3, executable='functional-test-runner')
 
@@ -248,6 +255,8 @@ class Microbench(Benchmark):
         time_start = time.time()
         sh.drop_caches()
         cmd_str = "./src/bench/bench_bitcoin"
+        self.results.configure_info = hwinfo.parse_configure_log(
+            self.cfg.workdir / 'bitcoin')
 
         if bench_cfg.filter:
             cmd_str += " -filter='{}'".format(bench_cfg.filter)
@@ -258,6 +267,7 @@ class Microbench(Benchmark):
         (microbench_stdout,
          microbench_stderr) = microbench_ps.communicate()
         self.results.command = cmd_str
+        self.results.title = 'Microbench'
         self.results.total_time = (time.time() - time_start)
 
         if microbench_ps.returncode != 0:
@@ -293,7 +303,11 @@ class Microbench(Benchmark):
             )
 
 
-class IbdBench(Benchmark):
+class _IbdBench(Benchmark):
+    """
+    This is an abstract class that unifies common code for IBD-like benchmarks,
+    which includes reindexing.
+    """
     name = 'ibd'
     _results_class = results.IbdResults
     id_format = ''  # We use _get_codespeed_bench_name() instead.
@@ -308,6 +322,13 @@ class IbdBench(Benchmark):
         # This might return None if we're IBDing from network.
         self.server_node = bitcoind.get_synced_node(self.cfg)
         return self.server_node
+
+    def _get_dbcache(self) -> str:
+        assert self.client_node.cmd
+        for i in self.client_node.cmd.cmd.split():
+            if i.startswith('-dbcache='):
+                return i.split('=')[-1]
+        return '500'  # The default dbcache value at time of writing
 
     def _get_client_node(self) -> bitcoind.Node:
         pass
@@ -332,7 +353,11 @@ class IbdBench(Benchmark):
         last_resource_usage = None
         start_time = None
 
+        self.results.configure_info = hwinfo.parse_configure_log(
+            self.cfg.workdir / 'bitcoin')
+
         self.results.command: str = self.client_node.cmd.cmd
+        self.results.title: str = self._get_title()
 
         if self.server_node:
             server_blockchaininfo = self.server_node.call_rpc(
@@ -521,6 +546,15 @@ class IbdBench(Benchmark):
                 last_resource_usage.num_fds,
             )
 
+    def _get_datadir_path(self) -> Path:
+        assert self.client_node.cmd
+        cmd: str = self.client_node.cmd.cmd
+        assert '-datadir=' in cmd
+
+        for i in cmd.split():
+            if i.startswith('-datadir='):
+                return Path(i.split('=', 1)[-1])
+
     def _teardown(self):
         """
         Shut down all the nodes we started and stash the datadir if need be.
@@ -530,6 +564,14 @@ class IbdBench(Benchmark):
             self.client_node.stop_via_rpc(timeout=(60 * 25))
         if self.server_node:
             self.server_node.stop_via_rpc(timeout=120)
+
+        # Copy logfile to results
+        debuglogpath = str(self._get_datadir_path() / 'debug.log')
+        debuglogname = 'debug.{}-{}.log'.format(self.target.name, self.run_idx)
+        shutil.copyfile(debuglogpath, str(self.cfg.results_dir / debuglogname))
+
+        with open(debuglogpath, 'r') as f:
+            self.results.flush_events = logparse.get_flush_times(f)
 
         if getattr(self.bench_cfg, 'stash_datadir', None):
             src_datadir = getattr(self.bench_cfg, 'src_datadir', None)
@@ -552,7 +594,7 @@ class IbdBench(Benchmark):
                 shutil.rmtree(datadir)
 
 
-class IbdLocal(IbdBench):
+class IbdLocal(_IbdBench):
     name = 'ibd.local'
 
     def _get_client_node(self):
@@ -573,8 +615,12 @@ class IbdLocal(IbdBench):
 
         return self.client_node
 
+    def _get_title(self):
+        return 'IBD from on-host peer to height {} (dbcache={})'.format(
+            self.bench_cfg.end_height, self._get_dbcache())
 
-class IbdRangeLocal(IbdBench):
+
+class IbdRangeLocal(_IbdBench):
     name = 'ibd.local.range'  # Range is reflected in starting height
 
     def _get_client_node(self):
@@ -599,8 +645,14 @@ class IbdRangeLocal(IbdBench):
         })
         return self.client_node
 
+    def _get_title(self):
+        return 'IBD from on-host peer, heights {}-{} (dbcache={})'.format(
+            self.bench_cfg.start_height,
+            self.bench_cfg.end_height,
+            self._get_dbcache())
 
-class IbdReal(IbdBench):
+
+class IbdReal(_IbdBench):
     name = 'ibd.real'
 
     def _get_server_node(self):
@@ -617,8 +669,12 @@ class IbdReal(IbdBench):
         self.client_node.start()
         return self.client_node
 
+    def _get_title(self):
+        return 'IBD from the live network to height {} (dbcache={})'.format(
+            self.bench_cfg.end_height, self._get_dbcache())
 
-class Reindex(IbdBench):
+
+class Reindex(_IbdBench):
     name = 'reindex'
 
     def _get_server_node(self):
@@ -634,8 +690,12 @@ class Reindex(IbdBench):
         self.client_node.start(reindex=1)
         return self.client_node
 
+    def _get_title(self):
+        return 'Reindex to height {} (dbcache={})'.format(
+            self.bench_cfg.end_height, self._get_dbcache())
 
-class ReindexChainstate(IbdBench):
+
+class ReindexChainstate(_IbdBench):
     name = 'reindex_chainstate'
 
     def _get_server_node(self):
@@ -650,6 +710,10 @@ class ReindexChainstate(IbdBench):
 
         self.client_node.start(**{'reindex-chainstate': 1})
         return self.client_node
+
+    def _get_title(self):
+        return 'Reindex-chainstate to height {} (dbcache={})'.format(
+            self.bench_cfg.end_height, self._get_dbcache())
 
 
 def _log_bench_result(succeeded: bool, bench_name: str, cmd: sh.Command):

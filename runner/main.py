@@ -17,7 +17,8 @@ import pickle
 from pathlib import Path
 
 from . import (
-    output, config, bitcoind, results, slack, benchmarks, logging, git, sh)
+    output, config, bitcoind, results, slack, benchmarks, logging, git, sh,
+    hwinfo)
 from .globals import G
 from .logging import get_logger
 from .sh import run
@@ -175,14 +176,14 @@ def _get_shutdown_handler(cfg: config.Config):
 
 def _stash_debug_file(cfg: config.Config):
     """
-    Throw the last debug file into /tmp so that we avoid removing it with the
+    Throw the last debug file so that we avoid removing it with the
     rest of the bitcoin stuff.
     """
     # Move the debug.log file out into /tmp for diagnostics.
     debug_file = cfg.workdir / 'bitcoin' / 'data' / 'debug.log'
     if debug_file.is_file():
         # Overwrite the file so as not to fill up disk.
-        debug_file.rename(Path("/tmp/bitcoinperf-last-debug.log"))
+        debug_file.rename(cfg.workdir / 'stashed-debug.log')
 
 
 def main():
@@ -229,16 +230,26 @@ def main():
                 text=traceback.format_exc(), success=False)
             raise
 
+        logger.info("Getting hardware information")
+        hw = hwinfo.get_hwinfo(cfg.workdir, None)
+
+        res_dict = {
+            'runs': results.ALL_RUNS,
+            'hwinfo': hw,
+        }
+
         try:
-            (cfg.results_dir / 'all_runs.pickle').write_bytes(pickle.dumps(
-                results.ALL_RUNS))
-            logger.info("Wrote serialized benchmark results to %s",
-                        cfg.results_dir / 'all_runs.pickle')
+            results_path = cfg.results_dir / 'results.pickle'
+            results_path.write_bytes(pickle.dumps(res_dict))
+            logger.info(
+                "Wrote serialized benchmark results to %s", results_path)
         except Exception:
             logger.exception("failed to pickle results")
 
     elif arg.endswith('pickle'):
-        results.ALL_RUNS = pickle.loads(Path(arg).read_bytes())
+        unpickled = pickle.loads(Path(arg).read_bytes())
+        results.ALL_RUNS = unpickled['runs']
+        results.HWINFO = unpickled['hwinfo']
 
     grouped = output.GroupedRuns.from_list(results.ALL_RUNS)
 

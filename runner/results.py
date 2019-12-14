@@ -4,11 +4,13 @@ from dataclasses import dataclass, field
 
 from .git import GitCheckout
 from .logging import get_logger
+from .logparse import FlushEvent
 
 logger = get_logger()
 
 
 ALL_RUNS: t.List['Benchmarks'] = []
+HWINFO: t.Dict = {}
 
 
 class Reporters:
@@ -23,8 +25,17 @@ class Results:
     A container for results data. Paired with each Benchmark type in
     `runner.benchmarks`.
     """
+    # The primary shell command associated with this benchmark.
+    command: str = ''
+
+    # A shortish title suitable for presentation on a graph.
+    title: str = ''
+
     total_time: int = None
     peak_rss_kb: int = None
+
+    # See hwinfo.parse_configure_log()
+    configure_info: dict = None
 
 
 class HeightData(t.NamedTuple):
@@ -37,6 +48,9 @@ class HeightData(t.NamedTuple):
 @dataclass
 class IbdResults(Results):
     height_to_data: t.Dict[int, HeightData] = field(default_factory=dict)
+
+    # When the coins cache is flushed from memory to disk.
+    flush_events: t.List[FlushEvent] = field(default_factory=list)
 
 
 @dataclass

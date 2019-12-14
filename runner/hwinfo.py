@@ -83,6 +83,7 @@ def get_hwinfo(datadir_path: str, srcdir_path: str):
     out_dict = dict(
         hostname=socket.gethostname(),
         cpu_model_name=get_processor_name(),
+        cpu_count=psutil.cpu_count(),
         ram_gb=(psutil.virtual_memory().total / (1024**3)),
         os=list(distro.linux_distribution()),
         arch=platform.machine(),

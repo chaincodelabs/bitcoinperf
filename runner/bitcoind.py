@@ -123,7 +123,6 @@ class Node:
         self.start_time = time.time()
         self.cmd = sh.Command(run_cmd, 'run node'.format(self))
         self.cmd.start()
-        logger.info("starting node with datadir %s", self.datadir)
         logger.debug("command '%s' starting for %s", run_cmd, self)
 
     def get_args_dict(self) -> dict:
