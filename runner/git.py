@@ -86,7 +86,11 @@ def checkout_in_dir(
     # Special case which does no rebase; allows for specifying commit hashes
     # to be tested.
     else:
-        sh.run("git checkout {}".format(target.gitref))
+        if target.gitref == 'master':
+            # Dumb hack to resolve multiple `master` branches in remotes.
+            sh.run("git checkout --track origin/master master")
+        else:
+            sh.run("git checkout {}".format(target.gitref))
         gitsha = get_sha('HEAD')
         co = GitCheckout(
             ref=target.gitref, sha=gitsha, commit_msg=get_commit_msg('HEAD'))
