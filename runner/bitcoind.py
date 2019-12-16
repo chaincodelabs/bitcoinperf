@@ -110,7 +110,7 @@ class Node:
 
         if kwargs.get('debug'):
             cmd += '-debug={} '.format(kwargs['debug'])
-        else
+        else:
             cmd += '-debug=coindb -debug=bench '
 
         # Add remaining arguments
