@@ -108,7 +108,10 @@ class Node:
         elif 'assumevalid' not in self.extra_args:
             cmd += '-assumevalid={} '.format(DEFAULT_ASSUMEVALID)
 
-        cmd += '-debug={} '.format(kwargs.pop('debug', 'all'))
+        if kwargs.get('debug'):
+            cmd += '-debug={} '.format(kwargs['debug'])
+        else
+            cmd += '-debug=coindb -debug=bench '
 
         # Add remaining arguments
         for k, v in kwargs.items():
