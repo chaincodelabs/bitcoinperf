@@ -88,7 +88,7 @@ def checkout_in_dir(
     else:
         if target.gitref == 'master':
             # Dumb hack to resolve multiple `master` branches in remotes.
-            sh.run("git checkout --track origin/master master")
+            sh.run("git checkout {}/master".format(target.gitremote))
         else:
             sh.run("git checkout {}".format(target.gitref))
         gitsha = get_sha('HEAD')
