@@ -5,11 +5,9 @@ from argparse import Namespace
 # a benchmark run.
 G = Namespace()
 
-# The git checkout currently being benched.
+# The git checkout currently being benched. Made global for easy reference
+# from the logger.
 G.gitco: 'GitCheckout' = None
-
-# The compiler currently in use.
-G.compiler: 'Compilers' = None
 
 # The current benchmark being run.
 G.bench: 'Benchmark' = None
@@ -18,7 +16,7 @@ G.bench: 'Benchmark' = None
 G.benchmark: 'Benchmark' = None
 
 # Did we acquire the system-wide lockfile?
-G.lockfile_acquired: bool = False
+G.lockfile_held: bool = False
 
 G.slack: 'SlackClient' = None
 

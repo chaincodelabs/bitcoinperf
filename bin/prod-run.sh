@@ -21,6 +21,6 @@ while true; do
   sudo swapoff -a
   source runner/.env
   git pull
-  ~/.local/bin/bitcoinperf examples/prod.yml
+  ~/.local/bin/bitcoinperf run examples/prod.yml
   sleep 60
 done

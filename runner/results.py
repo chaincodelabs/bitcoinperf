@@ -31,7 +31,8 @@ class Results:
     # A shortish title suitable for presentation on a graph.
     title: str = ''
 
-    total_time: int = None
+    # In seconds
+    total_time_secs: float = None
     peak_rss_kb: int = None
 
     # See hwinfo.parse_configure_log()

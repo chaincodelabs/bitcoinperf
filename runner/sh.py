@@ -4,8 +4,11 @@ import time
 import shutil
 import os
 import tempfile
+import textwrap
+import re
 import typing as t
 from pathlib import Path
+from collections import namedtuple
 
 from psutil import Process
 
@@ -13,24 +16,28 @@ from psutil import Process
 logger = logging.getLogger('bitcoinperf')
 
 
-def drop_caches():
-    ret = run("sync; sudo -n /sbin/swapoff -a;", check_returncode=False)
+def drop_caches(assert_drop: bool = False):
+    ret = run("sync; sudo -n /sbin/swapoff -a;", check=False)
 
-    if ret[-1] != 0:
+    if not ret.ok:
         # Don't log as harshly about this because disabling swap isn't as
         # important.
         logger.info(
             "!!! couldn't turn off swap. Bench results may be suspect! "
             "You probably need to tune your /etc/sudoers file.")
+        if assert_drop:
+            raise RuntimeError("failed to turn off swap")
 
     # N.B.: the host sudoer file needs to be configured to allow non-superusers
     # to run this command. See: https://unix.stackexchange.com/a/168670
-    ret2 = run("sudo -n /sbin/sysctl vm.drop_caches=3", check_returncode=False)
+    ret2 = run("sudo -n /sbin/sysctl vm.drop_caches=3", check=False)
 
-    if ret2[-1] != 0:
-        logger.warning(
-            "!!! COULDN'T DROP CACHES! Bench results may be suspect! "
+    if not ret2.ok:
+        logger.info(
+            "!!! couldn't drop caches! Bench results may be suspect! "
             "You probably need to tune your /etc/sudoers file.")
+        if assert_drop:
+            raise RuntimeError("failed to drop caches")
 
 
 def rm(path: Path):
@@ -40,21 +47,6 @@ def rm(path: Path):
         shutil.rmtree(path)
     else:
         path.unlink()
-
-
-def run(*args, check_returncode=True, **kwargs) -> (bytes, bytes, int):
-    logger.debug("Running command %r", args)
-    p = subprocess.Popen(
-        *args, **kwargs,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-
-    (stdout, stderr) = p.communicate()
-
-    if check_returncode and p.returncode != 0:
-        raise RuntimeError(
-            "Command '%s' failed with code %s\nstderr:\n%s\nstdout:\n%s" % (
-                args[0], p.returncode, stderr, stdout))
-    return (stdout, stderr, p.returncode)
 
 
 def popen(args, env=None, stdout=None, stderr=None):
@@ -83,8 +75,16 @@ class ResourceUsage(t.NamedTuple):
 class Command:
     """
     Manages the running of a subprocess for a certain benchmark.
+
+    Buffers output into tmpfiles to avoid blowing out memory. Allows easy
+    reporting of runtime characteristics like time, memory usage, CPU usage,
+    etc.
     """
-    def __init__(self, cmd: str, bench_name: str):
+    def __init__(self, cmd: str, bench_name: t.Optional[str] = None):
+        """
+        Args:
+            bench_name: optional for logging context
+        """
         self.cmd = cmd
         self.bench_name = bench_name
         self.ps = None
@@ -104,7 +104,8 @@ class Command:
             stdout=self.stdout_fd,
             stderr=self.stderr_fd,
         )
-        logger.debug("[%s] command '%s' starting", self.bench_name, self.cmd)
+        prefix = f"[{self.bench_name}] " if self.bench_name else ""
+        logger.debug(f"{prefix}command '%s' starting", self.cmd)
 
     def join(self, timeout=None):
         self.ps.wait(timeout=timeout)
@@ -119,15 +120,19 @@ class Command:
 
     @property
     def total_secs(self) -> float:
-        return (self.end_time or time.time()) - self.start_time
+        assert self.start_time
+        start = float(self.start_time)
+        return (self.end_time or time.time()) - start
 
     @property
-    def returncode(self):
+    def returncode(self) -> int:
+        assert self.ps
         return self.ps.returncode
 
     def memusage_kib(self) -> int:
         if self.returncode is None:
             return self.get_resource_usage().rss_kb
+        assert self.stderr
         return int(self.stderr.decode().strip().split('\n')[-1])
 
     def check_for_failure(self):
@@ -135,7 +140,8 @@ class Command:
         Parse output and returncode to determine if there was a failure.
 
         Sometimes certain benchmarks may fail with zero returncodes and we must
-        check other things to detect the failure.
+        check other things to detect the failure; e.g. disk space checks during
+        IBD.
         """
         if self.returncode is None:
             raise RuntimeError("can't check for failure before completion")
@@ -147,6 +153,7 @@ class Command:
         Return various resource usage statistics about the running process.
         """
         assert not self.returncode, "Can't collect data on stopped process"
+        assert self.ps
 
         proc = Process(self.ps.pid)
 
@@ -175,3 +182,75 @@ class Command:
                 memory_info=proc.memory_info(),
                 num_fds=proc.num_fds(),
             )
+
+
+class RunReturn(namedtuple('RunReturn', 'args,returncode,stdout,stderr')):
+
+    @property
+    def ok(self):
+        return self.returncode == 0
+
+    @classmethod
+    def from_std(cls, cp: subprocess.CompletedProcess):
+        return cls(cp.args, cp.returncode, cp.stdout, cp.stderr)
+
+    @property
+    def output(self) -> str:
+        return f"[stdout]\n\n{self.stdout}\n\n[stderr]\n\n{self.stderr}"
+
+    def failure_msg(self, msg) -> str:
+        return f"{msg}:\n{self.output}"
+
+
+def run(cmd: str,
+        check: bool = False,
+        quiet: bool = False,
+        **kwargs) -> RunReturn:
+    """Run a command synchonrously."""
+    kwargs.setdefault('text', True)
+    kwargs.setdefault('shell', True)
+    kwargs.setdefault('stdout', subprocess.PIPE)
+    kwargs.setdefault('stderr', subprocess.PIPE)
+
+    if quiet:
+        kwargs['stdout'] = subprocess.DEVNULL
+        kwargs['stderr'] = subprocess.DEVNULL
+
+    r = RunReturn.from_std(subprocess.run(cmd, **kwargs))
+
+    if not r.ok:
+        cmd_failed = (
+            "Command failed (code {}): {}\n[ stdout ]\n{}\n[ stderr ]\n{}"
+            .format(r.returncode, cmd, r.stdout, r.stderr))
+        logger.debug(cmd_failed)
+
+        if check:
+            raise RuntimeError(cmd_failed)
+
+    return r
+
+
+CmdStrs = t.Union[str, t.Iterable[str]]
+
+
+def runmany(cmds: CmdStrs, check: bool = True) -> t.List[RunReturn]:
+    out = []
+
+    for cmd in _split_cmd_input(cmds):
+        r = run(cmd)
+        out.append(r)
+
+        if check and not r.ok:
+            break
+
+    return out
+
+
+def _split_cmd_input(cmds: CmdStrs) -> t.List[str]:
+    if isinstance(cmds, list):
+        return cmds
+    cmds = str(cmds)  # for mypy
+    cmds = textwrap.dedent(cmds)
+    # Eat linebreaks
+    cmds = re.sub(r'\s+\\\n\s+', ' ', cmds)
+    return [i.strip() for i in cmds.splitlines() if i]
