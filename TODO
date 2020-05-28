@@ -1,0 +1,3 @@
+- [ ] Upload full output from bad run to gist (or text document dump somewhere)
+- [ ] `--enable-perf` for perf-capture -> flamegraph
+- [ ] `bench-pr --configure-args 'ref:"-this-arg HEY -that-arg YO"'

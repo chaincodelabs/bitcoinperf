@@ -6,3 +6,4 @@ matplotlib
 pyyaml
 pydantic
 distro==1.4.0
+clii==0.2.0

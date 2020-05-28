@@ -69,7 +69,7 @@ class BenchList(t.List[Benchmark]):
     def total_time_result(self) -> BenchVal:
         return BenchVal(
             total_time_id(self[0].id),
-            [i.results.total_time for i in self],
+            [i.results.total_time_secs for i in self],
         )
 
     def peak_rss_result(self) -> t.Optional[BenchVal]:
@@ -333,6 +333,7 @@ def get_processor_info() -> str:
 def _get_git_info(benches) -> str:
     out = '\n'
     for bench in benches:
+        print(bench.target.name, bench.gitco)
         out += '{}: {}\n'.format(bench.target.name, bench.gitco.sha[:10])
     return out.rstrip()
 
@@ -404,7 +405,7 @@ def _make_ibd_type_plot(
         if not title:
             title = benchlist[0].results.title
 
-        total_time_data.append([b.results.total_time for b in benchlist])
+        total_time_data.append([b.results.total_time_secs for b in benchlist])
         peak_mem_data.append(
             [kib_to_mb(b.results.peak_rss_kb) for b in benchlist])
 
@@ -525,7 +526,6 @@ def _make_cache_flush_plot(
 
         for i, b in enumerate(benchlist):
             targets_to_flush_list[i][target] = b.results.flush_events
-
 
     def add_iters(b, add=''):
         return b + add + " (x{})".format(num_runs)

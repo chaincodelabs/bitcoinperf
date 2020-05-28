@@ -1,3 +1,32 @@
+import itertools
+import hashlib
+
+
+def sha256(inp: str):
+    return hashlib.sha256(inp.encode()).hexdigest()
+
+
+def is_hex(s: str) -> bool:
+    try:
+        int(s, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def shuffled_sequence(seed: int, items: list, run_count: int):
+    """
+    Args:
+        seed: used to determine how to permute the branch order
+    """
+    perms = itertools.cycle(itertools.permutations(items))
+
+    for i in range(seed):
+        next(perms)
+    bench_order = list(next(perms))
+
+    # Run everything twice.
+    return bench_order * run_count
 
 
 def md_table(headers, values) -> str:
