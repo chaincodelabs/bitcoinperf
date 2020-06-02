@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.7
+#!/usr/bin/env python3.8
 """
 Usage:
     <hostname ...>
@@ -202,7 +202,7 @@ def run_cmd(cmd, *args):
 
 def install_pyperf():
     runmany("""
-        sudo python3.7 -m pip install pyperf
+        sudo python3.8 -m pip install pyperf
         echo 'ccl     ALL=(ALL) NOPASSWD:/usr/local/bin/pyperf system tune' \
             | sudo tee -a /etc/sudoers
     """)
@@ -218,7 +218,7 @@ def run_on_host(router, hostname, count, args):
     )
     context = router.ssh(hostname=hostname,
                          check_host_keys='ignore',
-                         python_path=['/usr/local/bin/python3.7'],
+                         python_path=['/usr/local/bin/python3.8'],
                          **creds,
                          )
 

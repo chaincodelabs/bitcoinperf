@@ -13,8 +13,8 @@ services:
 
       # You may need to change the source of this mount to a directory on your
       # host machine that contains a synced datadir.
-      - /data/bitcoin_bench:/data/bitcoin_bench
-      - /data/bitcoin_pruned_500k:/data/bitcoin_pruned_500k
+      # - /data/bitcoin_bench:/data/bitcoin_bench
+      # - /data/bitcoin_pruned_500k:/data/bitcoin_pruned_500k
 
   codespeed:
     ports:

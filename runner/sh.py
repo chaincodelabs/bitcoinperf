@@ -40,6 +40,11 @@ def drop_caches(assert_drop: bool = False):
             raise RuntimeError("failed to drop caches")
 
 
+def cd(*args, **kwargs):
+    os.chdir(*args, **kwargs)
+    logger.debug(f"chdir -> {args[0]}")
+
+
 def rm(path: Path):
     if path.is_symlink():
         path.unlink()

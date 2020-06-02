@@ -16,13 +16,13 @@ compilers:
   - clang
 
 synced_peer:
-  datadir: /data/bitcoin_bench
-  repodir: /bitcoin
-  bitcoind_extra_args: ''
+  # datadir: /data/bitcoin_bench
+  # repodir: /bitcoin
+  # bitcoind_extra_args: ''
 
   # or, if over network
-  #
-  # address:
+  
+  address: tanoshii.local:8333
 
 
 codespeed:
@@ -62,7 +62,7 @@ benches:
   ibd_range_from_local:
     start_height: 500_000
     end_height: 500_500
-    src_datadir: /data/bitcoin_pruned_500k
+    src_datadir: /home/james/.bitcoinperf/base_datadirs/pruned-500k
     time_heights:
       - 500_250
       - 500_350
