@@ -37,7 +37,7 @@ def cache_repo():
     logger.info("Cloning bitcoin repo from url %s", url)
     sh.run("git clone {} {}".format(url, cache_path))
 
-    os.chdir(cache_path)
+    sh.cd(cache_path)
 
     sh.run('git fetch')
     sh.run("git checkout origin/master")
@@ -45,7 +45,8 @@ def cache_repo():
 
 def get_repo(git_path: Path, cached_okay: bool = True):
     """
-    Check out the bitcoin git repo to a path, optionally copying from a cache.
+    Check out the bitcoin git repo to a path if necessary, optionally
+    copying from a cache.
     """
     copy_from_path = None
 
@@ -64,7 +65,7 @@ def get_repo(git_path: Path, cached_okay: bool = True):
             logger.info("Cloning bitcoin repo from url %s", url)
             sh.run("git clone {} {}".format(url, git_path))
 
-    os.chdir(git_path)
+    sh.cd(git_path)
     sh.run('git fetch --all')
     sh.run("git checkout origin/master")
 
@@ -78,7 +79,6 @@ def checkout_in_dir(git_path: Path, target: config.Target) -> GitCheckout:
     attached.
     """
     assert target.gitco, 'Target must be resolved before checking out.'
-    get_repo(git_path)
     co = target.gitco
     if sh.run(f"git checkout {co.sha}").returncode != 0:
         raise RuntimeError(f"sha {co.sha} was not valid in {git_path}")
@@ -111,7 +111,7 @@ def resolve_targets(repo_path: Path,
     if not repo_path.exists():
         get_repo(repo_path)
 
-    os.chdir(repo_path)
+    sh.cd(repo_path)
 
     remotes = {
         i.split()[0] for i in
@@ -233,7 +233,7 @@ def get_commit_msg(ref: str) -> str:
 
 
 def get_git_mergebase(repo_path: Path, remote: str, name: str) -> str:
-    os.chdir(repo_path)
+    sh.cd(repo_path)
 
     arg = f'{remote}/{name}' if not is_hex(name) else name
 

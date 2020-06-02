@@ -65,7 +65,10 @@ class Node:
         self.extra_args = extra_args or ''
 
         if copy_from_datadir:
-            shutil.rmtree(self.datadir)
+            if self.datadir.exists():
+                sh.rm(self.datadir)
+            logger.info(
+                f'Seeding datadir from {copy_from_datadir} -> {self.datadir}')
             shutil.copytree(copy_from_datadir, self.datadir)
         else:
             self.datadir.mkdir(exist_ok=True)
@@ -322,6 +325,11 @@ def _find_unused_port(startval=8888) -> int:
     return portnum
 
 
+# Synced peers should only be built once per process, since their git ref
+# will never change within a bitcoinperf process. Cache them here.
+_built_peer_cache: t.Dict[config.SyncedPeer, bool] = {}
+
+
 def get_synced_node(peer_config: config.SyncedPeer,
                     required_height: int = None) -> t.Optional[Node]:
     """
@@ -337,12 +345,7 @@ def get_synced_node(peer_config: config.SyncedPeer,
         # teardown.
         return None
 
-    # Synced peers should only be built once per process, since their git ref
-    # will never change within a bitcoinperf process. Cache them here.
-    if not hasattr(get_synced_node, '__built'):
-        setattr(get_synced_node, '__built', {})
-
-    if peer_config.gitref and not get_synced_node.__built.get(peer_config):
+    if peer_config.gitref and not _built_peer_cache.get(peer_config):
         logger.info(f'Starting build for synced peer ({peer_config})')
         target = config.Target(gitref=peer_config.gitref, rebase=False)
         [co], _ = git.resolve_targets(peer_config.repodir, [target])
@@ -351,7 +354,7 @@ def get_synced_node(peer_config: config.SyncedPeer,
         builder.build(target, config.Compilers.gcc)
         logger.info(f'Finished build for synced peer ({peer_config})')
 
-        get_synced_node.__built[peer_config] = True
+        _built_peer_cache[peer_config] = True
 
     server = Node(
         peer_config.repodir,
@@ -363,7 +366,7 @@ def get_synced_node(peer_config: config.SyncedPeer,
     logger.info("synced node is active (pid %s)", server.ps.pid)
 
     # Clean up any path changes.
-    os.chdir(curr_path)
+    sh.cd(curr_path)
     return server
 
 
@@ -394,6 +397,24 @@ class BuildManager:
         Returns: a completed Command if we did a build, None if we used cache.
         """
         logger.info(f"Starting build for {target.cache_key}")
+        repodir = self.workdir / 'bitcoin'
+        makefile = repodir / 'Makefile'
+        sh.cd(repodir)
+
+        if makefile.exists():
+            logger.info('Running make clean')
+            sh.run('make clean')
+
+        git.checkout_in_dir(repodir, target)
+
+        # Sanity check - compare the commit message as an extra assurance.
+        msg = git.get_commit_msg('HEAD')
+        assert target.gitco
+        if msg != target.gitco.commit_msg:
+            raise RuntimeError(
+                "checkout {} has bad HEAD (expected '{}', got '{}')!".format(
+                    repodir, target.gitco.commit_msg, msg))
+
         num_jobs = num_jobs or config.DEFAULT_NPROC
         # Important that we set this envvar before potentially early-exiting
         # from cache.
@@ -403,18 +424,20 @@ class BuildManager:
         if self.cache_path and cache.restore(target):
             return None
 
-        os.chdir(self.workdir / 'bitcoin')
+        if not (repodir / 'db4').exists():
+            logger.info("Retrieving db4")
+            assert sh.run("./contrib/install_db4.sh .").ok
 
-        logger.info("Building db4")
-        sh.run("./contrib/install_db4.sh .")
-        sh.run("./autogen.sh")
+        if not (repodir / 'configure').exists():
+            logger.info("Running autogen.sh")
+            assert sh.run("./autogen.sh").ok
 
         configure_prefix = ''
         if compiler == config.Compilers.clang:
             configure_prefix = 'CC=clang CXX=clang++ '
 
         # Ensure build is clean.
-        makefile_path = self.workdir / 'bitcoin' / 'Makefile'
+        makefile_path = repodir / 'Makefile'
         if makefile_path.is_file() and self.clean:
             sh.run('make distclean')
 
@@ -427,7 +450,7 @@ class BuildManager:
             boostflags = '--with-boost-libdir=%s' % armlib_path
 
         logger.info("Running ./configure ...")
-        sh.run(
+        conf = sh.run(
             configure_prefix +
             './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
             'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
@@ -436,15 +459,22 @@ class BuildManager:
             # are timed accurately.
             '--disable-ccache ' + boostflags)
 
+        if not conf.ok:
+            logger.error(conf.failure_msg(f"configure failed for {target}"))
+            raise RuntimeError('configure failed')
+
         logger.info(f"Running make -j {num_jobs}")
         cmd = sh.Command(f"make -j {num_jobs}")
         cmd.start()
         cmd.join()
 
-        if self.cache_path:
+        _assert_version(repodir, target.gitco.sha)
+
+        if cmd.returncode == 0 and self.cache_path:
             cache.save(target)
             cache.clean()
 
+        # cmd error will be handled by caller
         return cmd
 
 
@@ -465,7 +495,10 @@ class BuildCache:
         cache = self._get_cache_path(target)
         logger.info("Copying build to cache %s", cache)
         btcdir = self.workdir / 'bitcoin'
-        shutil.copytree(btcdir, cache)
+        srcdir = btcdir / 'src'
+        shutil.copy(srcdir / 'bitcoind', cache)
+        shutil.copy(srcdir / 'bitcoin-cli', cache)
+        shutil.copy(srcdir / 'bench' / 'bench_bitcoin', cache)
 
     def restore(self, target: config.Target) -> bool:
         """
@@ -475,15 +508,20 @@ class BuildCache:
 
         Returns True if we restored the build from cache.
         """
-        os.chdir(self.workdir)
+        repodir = self.workdir / 'bitcoin'
+        srcdir = repodir / 'src'
+        assert target.gitco
         cache = self._get_cache_path(target)
-        cache_bitcoind = cache / 'src' / 'bitcoind'
-        cache_bitcoincli = cache / 'src' / 'bitcoin-cli'
+        cache_bitcoind = cache / 'bitcoind'
+        cache_bitcoincli = cache / 'bitcoin-cli'
+        cache_bench = cache / 'bench_bitcoin'
 
         if not cache.exists():
             return False
 
-        if not (cache_bitcoind.exists() and cache_bitcoincli.exists()):
+        if not all(c.exists() for c in (cache_bitcoind,
+                                        cache_bitcoincli,
+                                        cache_bench)):
             logger.warning(
                 "Incomplete cache found at %s; rebuilding", cache)
             sh.rm(cache)
@@ -493,21 +531,11 @@ class BuildCache:
             "Cached version of build %s found - "
             "restoring from that and skipping build ", target.cache_key)
 
-        bitcoindir = self.workdir / 'bitcoin'
+        os.symlink(cache_bitcoind, srcdir / 'bitcoind')
+        os.symlink(cache_bitcoincli, srcdir / 'bitcoin-cli')
+        os.symlink(cache_bench, srcdir / 'bench' / 'bench_bitcoin')
 
-        if bitcoindir.exists():
-            sh.rm(bitcoindir)
-
-        os.symlink(cache, bitcoindir)
-        os.chdir(bitcoindir)
-        # Sanity check - compare the commit message as an extra assurance.
-        msg = git.get_commit_msg('HEAD')
-        assert target.gitco
-        if msg != target.gitco.commit_msg:
-            raise RuntimeError(
-                "cache {} has bad HEAD (expected '{}', got '{}')!".format(
-                    cache, target.gitco.commit_msg, msg))
-
+        _assert_version(repodir, target.gitco.sha)
         return True
 
     def clean(self):
@@ -522,3 +550,15 @@ class BuildCache:
         for stale in files_in_cache[CACHE_SIZE:]:
             logger.info("Deleting stale cache %s", stale)
             sh.rm(Path(stale))
+
+
+def _assert_version(repodir: Path, sha: str):
+    """Ensure we've checked out a specific version of bitcoin."""
+    srcdir = repodir / 'src'
+    # Sanity check - compare version as reported by binary
+    for bin in (srcdir / 'bitcoind', srcdir / 'bitcoin-cli'):
+        version_line = sh.run(f'{bin} -version | head -n 1').stdout
+
+        if sha[:8] not in version_line:
+            msg = f'expected: {sha}\nsaw: {version_line}'
+            raise RuntimeError(f'bad checkout: {repodir}\n{msg}')

@@ -27,6 +27,17 @@ BENCH_NAMES = {
     'gitclone', 'build', 'makecheck', 'functionaltests',
     'microbench', 'ibd', 'reindex'}
 
+# TODO shoulddn't be creating files on import
+config_path = Path.home() / '.bitcoinperf'
+config_path.mkdir(exist_ok=True)
+
+# Where the synced peer optionally resides.
+peer_path = config_path / 'peer'
+peer_repo = peer_path / 'bitcoin'
+peer_datadir = peer_path / 'datadir'
+base_datadirs = config_path / 'base_datadirs'
+pruned_500k_datadir = base_datadirs / 'pruned-500k'
+
 
 class Compilers(str, Enum):
     clang = 'clang'
@@ -84,8 +95,8 @@ def is_compiler(name):
     return name
 
 
-def is_port_open(addr: str) -> bool:
-    hostname, port = addr, '8332'
+def is_port_open(addr: str) -> str:
+    hostname, port = addr, '8333'
     if ':' in addr:
         hostname, port = addr.split(':')
 
@@ -93,7 +104,7 @@ def is_port_open(addr: str) -> bool:
     try:
         s.connect((hostname, int(port)))
         s.shutdown(2)
-        return True
+        return addr
     except Exception:
         raise ValueError("can't connect to node at {}".format(addr))
 
@@ -125,12 +136,11 @@ class ExistingDatadir(Path):
         yield is_datadir
 
 
-class BuiltRepoDir(Path):
+class RepoDir(Path):
     @classmethod
     def __get_validators__(cls):
         yield is_valid_path
         yield path_exists
-        yield is_built_bitcoin
 
 
 class WriteablePath(Path):
@@ -141,7 +151,7 @@ class WriteablePath(Path):
 
 class SyncedPeer(BaseModel):
     datadir: ExistingDatadir = ''
-    repodir: BuiltRepoDir = ''
+    repodir: RepoDir = ''
     bitcoind_extra_args: str = ''
     # or
     address: Op[NodeAddr] = None
@@ -311,11 +321,6 @@ class Target(BaseModel):
 
 class Slack(BaseModel):
     webhook_url: Op[EnvStr] = None
-
-
-# TODO shoulddn't be creating files on import
-config_path = Path.home() / '.bitcoinperf'
-config_path.mkdir(exist_ok=True)
 
 
 class Config(BaseModel):

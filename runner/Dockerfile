@@ -1,4 +1,4 @@
-FROM python:3.7-stretch
+FROM python:3.8-buster
 
 COPY ./bin/install.sh /usr/bin/provision
 RUN /usr/bin/provision
@@ -14,4 +14,6 @@ RUN ./contrib/install_db4.sh . && \
 WORKDIR /code
 COPY setup.py /code/
 COPY runner /code/runner
-RUN pip3 install -e . && pip3 install pytest ipython
+RUN pip3 install -r /code/runner/requirements.txt && \
+  pip3 install -e . && \
+  pip3 install pytest ipython

@@ -333,7 +333,6 @@ def get_processor_info() -> str:
 def _get_git_info(benches) -> str:
     out = '\n'
     for bench in benches:
-        print(bench.target.name, bench.gitco)
         out += '{}: {}\n'.format(bench.target.name, bench.gitco.sha[:10])
     return out.rstrip()
 
@@ -400,7 +399,6 @@ def _make_ibd_type_plot(
 
         if not cmd_str:
             cmd_str = _format_command(benchlist[0].results.command)
-            print(benchlist[0].results.configure_info)
 
         if not title:
             title = benchlist[0].results.title
@@ -501,11 +499,7 @@ def _make_cache_flush_plot(
 
     f.set_size_inches(8, 8)
 
-    total_time_data = []
-    peak_mem_data = []
-
     targets = [target for target in run_data.keys()]
-    target_names = [target.name for target in targets]
 
     # Get the plot title from the first bench command we see.
     cmd_str: str = ''

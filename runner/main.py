@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.7
+#!/usr/bin/env python3.8
 # vim: ft=python
 """
 Run a series of benchmarks against a particular Bitcoin Core revision(s).
@@ -13,8 +13,11 @@ import getpass
 import traceback
 import sys
 import pickle
+import random
+import time
 import typing as t
 from pathlib import Path
+from textwrap import dedent
 
 import clii
 
@@ -26,7 +29,7 @@ from .logging import get_logger
 
 logger = get_logger()
 
-assert sys.version_info >= (3,  7), "Python 3.7 required"
+assert sys.version_info >= (3, 8), "Python 3.8 required"
 
 # Maintain a lockfile that is global across the host to ensure that we're not
 # running more than one instance on a given system.
@@ -86,18 +89,15 @@ def run_full_suite(cfg):
     # TODO: move this somewhere more appropriate.
     _cleanup_tmpfiles()
     _startup_assertions(cfg)
-    checkouts, bad_targets = git.resolve_targets(
-        cfg.workdir / 'bitcoin', cfg.to_bench)
+    repodir = cfg.workdir / 'bitcoin'
+    git.get_repo(repodir)
+    checkouts, bad_targets = git.resolve_targets(repodir, cfg.to_bench)
 
     if bad_targets:
         logger.warning("Couldn't resolve git targets: %s", bad_targets)
         return
 
     for target in cfg.to_bench:
-        os.chdir(cfg.workdir)
-        if (cfg.workdir / 'bitcoin').exists():
-            sh.rm(cfg.workdir / 'bitcoin')
-
         assert target.gitco
         G.gitco = target.gitco
 
@@ -180,7 +180,7 @@ def _get_shutdown_handler(cfg: config.Config):
         # Clean up to avoid filling disk
         # TODO add more granular cleanup options
         if cfg.teardown and cfg.workdir.is_dir():
-            os.chdir(cfg.workdir)
+            sh.cd(cfg.workdir)
             _stash_debug_file(cfg)
 
             # For now only remove the bitcoin subdir, since that'll be far and
@@ -210,19 +210,238 @@ cli = clii.App(description=__doc__)
 cli.add_arg('--verbose', '-v', action='store_true')
 
 
+def _missing_pkgs() -> t.List[str]:
+    errs = []
+    if 'GNU time' not in sh.run('/usr/bin/time --version').stderr:
+        errs.append('Need to install GNU time (sudo apt install time)')
+
+    if not sh.run('which fio', quiet=True).ok:
+        errs.append('Need to install fio (sudo apt install fio)')
+
+    return errs
+
+
 @cli.cmd
-def bench_pr(pr_num: str, run_id: str = None, server_tag: str = 'v0.20.0rc2'):
+def setup():
     """
+    Run a guided setup of the fixture data needed to benchmark.
+    """
+    from .thirdparty import color as c
+
+    catchphrase = random.choice([
+        "let's be honest, it's basically your only option",
+        "barely adequate but almost certainly better than guessing",
+        "just slightly easier to configure than autotools",
+        "WITH_LOCK(::cs_main, chainstate->IsLoveReal())",
+        "get out, before the rats eat you!",
+    ])
+
+    print(f"""
+  _    _ _          _                     __
+ | |__(_) |_ __ ___(_)_ _  _ __  ___ _ _ / _|
+ | '_ \ |  _/ _/ _ \ | ' \| '_ \/ -_) '_|  _|
+ |_.__/_|\__\__\___/_|_||_| .__/\___|_| |_|
+                          |_|
+
+  {c.yellow(catchphrase)}
+    """)
+
+    def ent():
+        input('\npress [enter] to continue ')
+
+    print(dedent("""
+        Bitcoinperf requires the existence of some data and git repos;
+        we're going to set those up now.
+    """), end='')
+    ent()
+
+    def div():
+        print('\n' + '-' * 80 + '\n')
+
+    div()
+
+    _15m_load = os.getloadavg()[-1] > 1.0
+    if _15m_load > 1.0:
+        print(c.yellow(c.bold(dedent(f"""
+            Warning: I've noticed your load is highish (15m avg: {_15m_load}).
+
+            Please note that benchmark results are very suspect when run on
+            a computer used for regular activity. If you're doing other things
+            with the computer, the load may vary while bitcoinperf runs,
+            skewing results.
+        """))))
+
+        ent()
+
+    if not config.config_path.exists():
+        config.config_path.mkdir()
+        print('Created config dir at {config.config_path}')
+
+    print(dedent(f"""
+        Bitcoinperf benchmarks often rely on one bitcoind process, a fixture
+        peer, serving data to the bitcoind process being benchmarked. Since the
+        fixture peer needs data to serve, we have to prepopulate a repository
+        and datadir used to create the synced peer.
+
+        The bitcoin repo and datadir for this peer will be in
+
+            {config.peer_path}/bitcoin
+            {config.peer_path}/datadir
+    """))
+    ent()
+
+    if not config.peer_path.exists():
+        config.peer_path.mkdir()
+
+    def yn(prompt: str) -> bool:
+        return input(prompt).lower() in ['y', '']
+
+    if not config.peer_repo.exists():
+        print(dedent(f"""
+            The peer requires a bitcoin repo to exist at
+
+                {config.peer_repo}
+        """))
+
+        if yn('Clone bitcoin.git from GitHub? [Y/n] '):
+            url = 'https://github.com/bitcoin/bitcoin.git'
+            print(f'Cloning from {url}... ', end='')
+            sys.stdout.flush()
+            sh.run(f'git clone --depth 1 {url} {config.peer_repo}')
+            print(c.green(f'finished!'))
+            sys.stdout.flush()
+            time.sleep(0.8)
+        else:
+            print(c.red(c.bold(dedent(f"""
+                !! You'll need to provide a repo for the synced peer to
+                   use at {config.peer_repo}, or use the networked peer option
+                   (see config:SyncedPeer.address).
+
+                   You can symlink a repo, if that floats your boat.
+            """))))
+
+    if not config.peer_datadir.exists():
+        print(c.red(c.bold(dedent(f"""
+            !! You'll also need to provide the synced peer with a
+               populated datadir at
+
+                 {config.peer_datadir}
+
+               Either symlink or copy a datadir here that is synced to a height
+               above the range you want to benchmark (probably above at least
+               550,000).
+        """))))
+
+        print(c.cyan(c.bold(dedent(f"""
+            !! Alternatively you can specify a network address to use in lieu
+               of a local peer with the `--peer-address` flag. Bitcoinperf
+               will (obviously) not manage the setup/teardown of this peer.
+        """))))
+
+        ent()
+
+    if not config.base_datadirs.exists():
+        config.base_datadirs.mkdir()
+
+    if not config.pruned_500k_datadir.exists():
+        print(dedent(f'''
+            To do meaningful benchmarking, we often have to look at a region
+            of the chain that is well past the first few hundred thousand
+            blocks, since these blocks are not characteristic of where the
+            IBD process bottlenecks.
+
+            To this end, you can download a datadir that is pre-synced up to
+            height 500k. We will seed the benchmark node from this datadir so
+            that you can immediately start the benchmark from a part of the
+            chain that is meaningful to examine for overall performance.
+        '''))
+
+        prompt = 'Download pre-synced, pruned 500k block datadir? [Y/n] '
+        if yn(prompt):
+            url = 'https://storage.googleapis.com/chaincode-bitcoinperf/pruned_500k.tar.gz'  # noqa
+            print(f'Downloading and decompressing {url}...')
+            print(f'└─ this will take about 15 minutes')
+            sh.run(f'cd {config.base_datadirs} && curl {url} | tar xvz')
+            sh.run(
+                f'cd {config.base_datadirs} && '
+                f'mv data/bitcoin_pruned_500k {config.pruned_500k_datadir} &&'
+                f'rmdir data'
+            )
+            print(c.green(
+                f'Datadir pruned to 500k stored at '
+                f'{config.pruned_500k_datadir}'))
+        else:
+            print(c.red(c.bold(dedent(f"""
+                Be warned: `bitcoinperf bench-pr` will not work out of the box
+                without a datadir synced to 500k at
+
+                    {config.pruned_500k_datadir}
+                """))))
+
+    print(c.blue(dedent("""
+        Ensure you've installed all dependencies to compile bitcoin core
+        locally. See
+
+          - `./bin/install.sh` or
+          - https://github.com/bitcoin/bitcoin/blob/master/doc/build-unix.md
+    """)))
+
+    pkgs = _missing_pkgs()
+
+    if pkgs:
+        print(c.red('Missing packages: '))
+        for pkg_msg in pkgs:
+            print(c.red(f'  - {pkg_msg}'))
+
+    ent()
+
+    username = getpass.getuser()
+    print(c.blue(dedent(f"""
+        Be sure you've added the following lines to your /etc/sudoers file
+        so that we can drop caches:
+
+         {username}     ALL = NOPASSWD: /sbin/sysctl vm.drop_caches=3
+         {username}     ALL = NOPASSWD: /sbin/swapoff -a
+    """)))
+
+    print(c.green(dedent(f"""
+        cool, have fun.
+
+        `bitcoinperf bench-pr $PR_NUMBER` is probably what you want.
+    """)))
+
+
+@cli.cmd
+def bench_pr(pr_num: str,
+             run_id: str = None,
+             peer_tag: str = 'v0.20.0rc2',
+             peer_address: str = None,
+             num_blocks: int = 1_000,
+             run_count: int = 2,
+             run_micros: bool = False,
+             ):
+    """
+    Benchmark a PR relative to its merge base for some number of blocks,
+    starting from height 500_000.
+
     Args:
-        server_tag: which git tag the server bitcoind process will run
+        run_id: label for the run - will create /tmp/bitcoinperf-[run_id]
+        peer_tag: which git tag the server bitcoind process will run
+        peer_address: network address to use as peer instead of local instance
+        num_blocks: the number of blocks to benchmark
+        run_count: number of times to test IBD of each git ref
+        run_micros: if true, run the microbenchmarks
     """
     run_id = run_id or pr_num
     workdir = Path(f'/tmp/bitcoinperf-{run_id}')
+
     if workdir.exists():
+        logger.warning(f'Removing existing (old?) workdir {workdir}')
         sh.rm(workdir)
+
     workdir.mkdir()
-    repodir = workdir / 'bitcoin'
     logging.configure_logger(workdir, 'DEBUG' if cli.args.verbose else 'INFO')
+    repodir = workdir / 'bitcoin'
 
     targets = [
         config.Target(
@@ -232,28 +451,40 @@ def bench_pr(pr_num: str, run_id: str = None, server_tag: str = 'v0.20.0rc2'):
             rebase=False),
     ]
 
+    git.get_repo(repodir)
     checkouts, bad_targets = git.resolve_targets(repodir, targets)
     if bad_targets:
         print(f"failed to find commit for {[t.gitref for t in bad_targets]}")
         sys.exit(1)
 
-    end_height = 90_000
+    start_height = 500_000
+    end_height = 500_050
 
-    peer = config.SyncedPeer(
-        datadir=Path.home() / '.bitcoin',
-        repodir=Path.home() / 'src/bitcoin',
-        gitref=None,  # don't build TODO remove
-    )
+    peer_args: t.Dict[str, t.Union[str, Path]] = {}
+
+    if peer_address:
+        peer_args['address'] = peer_address
+    else:
+        peer_args.update(dict(
+            datadir=config.peer_datadir,
+            repodir=config.peer_repo,
+            gitref=peer_tag,
+        ))
+
+    peer = config.SyncedPeer(**peer_args)
 
     build_config = config.BenchBuild()
-    ibd_config = config.BenchIbdFromLocal(end_height=end_height)
-    compiler = config.Compilers.gcc
+    ibd_config = config.BenchIbdRangeFromLocal(
+        src_datadir=config.pruned_500k_datadir,
+        start_height=start_height,
+        end_height=end_height,
+    )
 
     cfg = config.Config(
         to_bench=targets,
         workdir=workdir,
         synced_peer=peer,
-        compilers=[compiler],
+        compilers=[config.Compilers.gcc],
         safety_checks=False,
     )
 
@@ -262,22 +493,41 @@ def bench_pr(pr_num: str, run_id: str = None, server_tag: str = 'v0.20.0rc2'):
 
     results: t.List[benchmarks.Benchmark] = []
 
-    for i, ts in enumerate([targets] * 2):
+    for i, ts in enumerate([targets]):
+        for target in ts:
+            for compiler in config.Compilers:
+                git.checkout_in_dir(workdir / 'bitcoin', target)
+
+                build = benchmarks.Build(
+                    cfg, build_config, compiler, target, i)
+                build.run(cfg, build_config)
+                assert build.gitco
+                results.append(build)
+
+                micro_conf = config.BenchMicrobench()
+                micro = benchmarks.Microbench(
+                    cfg, micro_conf, compiler, target, i)
+                micro.run(cfg, micro_conf)
+                assert micro.gitco
+                results.append(micro)
+
+    # Only do IBD benches with gcc since they're long and we ship binaries
+    # built with gcc.
+    compiler = config.Compilers.gcc
+
+    for i, ts in enumerate([targets] * run_count):
         for target in ts:
             git.checkout_in_dir(workdir / 'bitcoin', target)
 
             build = benchmarks.Build(cfg, build_config, compiler, target, i)
             build.run(cfg, build_config)
             assert build.gitco
-            results.append(build)
 
-            ibd = benchmarks.IbdLocal(cfg, ibd_config, compiler, target, i)
+            ibd = benchmarks.IbdRangeLocal(
+                cfg, ibd_config, compiler, target, i)
             ibd.run(cfg, ibd_config)
             assert ibd.gitco
             results.append(ibd)
-
-            # Crucial that we do this else we muck up the cache.
-            sh.rm(workdir / 'bitcoin')
 
     _persist_results(cfg, results)
     _print_results(cfg, results)
@@ -349,16 +599,6 @@ def render(pickle_filename: Path):
     results.HWINFO = unpickled['hwinfo']
 
     _print_results()
-
-
-@cli.cmd
-def setup():
-    # user = sh.run('whoami').stdout.strip()
-    # print(dedent("""
-    #     In another terminal, add to /etc/sudoers:
-
-    # """))
-    pass
 
 
 def _print_results(cfg: config.Config = None,

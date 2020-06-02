@@ -3,7 +3,6 @@ import copy
 import time
 import datetime
 import shutil
-import os
 import typing as t
 from pathlib import Path
 
@@ -130,8 +129,8 @@ class Benchmark(abc.ABC):
                     bench_name: str,
                     cmd: sh.Command):
         if not succeeded:
-            assert cmd.stdout
-            assert cmd.stderr
+            assert cmd.stdout is not None
+            assert cmd.stderr is not None
 
             logger.error(
                 "[%s] command failed with code %d\nstdout:\n%s\nstderr:\n%s",
@@ -153,7 +152,7 @@ class Build(Benchmark):
     id_format = 'build.make.{bench_cfg.num_jobs}.{self.compiler}'
 
     def _run(self, cfg, bench_cfg):
-        os.chdir(cfg.workdir)
+        sh.cd(cfg.workdir)
         num_jobs = bench_cfg.num_jobs
         builder = bitcoind.BuildManager(
             cfg.workdir,
@@ -219,9 +218,12 @@ class Microbench(Benchmark):
             text = "stdout:\n%s\nstderr:\n%s" % (
                 microbench_stdout.decode(), microbench_stderr.decode())
 
-            G.slack.send_to_slack_attachment(
-                self.gitco, "Microbench exited with code %s" %
-                microbench_ps.returncode, {}, text=text, success=False)
+            msg = "Microbench exited with code %s" % microbench_ps.returncode
+            if G.slack:
+                G.slack.send_to_slack_attachment(
+                    self.gitco, msg, {}, text=text, success=False)
+            else:
+                logger.warning(f"{msg} on {self.gitco}:\n{text}")
 
         microbench_lines = [
             # Skip the first line (header)
@@ -242,7 +244,7 @@ class Microbench(Benchmark):
             self.results.bench_to_time[bench] = median
             results.report_result(
                 self,
-                'micro.{self.compiler}.{bench}'.format(self=self, bench=bench),
+                'micro.{compiler}.{bench}'.format(compiler=self.compiler, bench=bench),
                 median,
                 extra_data={'result_max': max_, 'result_min': min_},
             )
@@ -265,9 +267,16 @@ class _IbdBench(Benchmark):
 
     def _get_server_node(self) -> t.Optional[bitcoind.Node]:
         # This might return None if we're IBDing from network.
-        if not self.cfg.synced_peer:
+        peer = self.cfg.synced_peer
+
+        if not peer:
+            logger.info('running benchmark without synced peer')
             return None
-        self.server_node = bitcoind.get_synced_node(self.cfg.synced_peer)
+        elif peer.address:
+            logger.info(f'using networked synced peer at {peer.address}')
+            return None
+
+        self.server_node = bitcoind.get_synced_node(peer)
         return self.server_node
 
     def _get_dbcache(self) -> str:
