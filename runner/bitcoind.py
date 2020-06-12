@@ -4,6 +4,7 @@ import typing as t
 import socket
 import subprocess
 import shutil
+import os
 from pathlib import Path
 
 from . import sh, logging
@@ -67,6 +68,12 @@ class Node:
         if copy_from_datadir:
             shutil.rmtree(self.datadir)
             shutil.copytree(copy_from_datadir, self.datadir)
+
+            # Make sure to clear out any old debug.log we've inherited from the
+            # source datadir so that our log start time isn't screwed up
+            # (see logparse.get_log_start()).
+            if (self.datadir / 'debug.log').exists():
+                os.unlink(str(self.datadir / 'debug.log'))
 
         self.cmd: sh.Command = None
         # Arguments this node has been started with.

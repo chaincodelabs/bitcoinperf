@@ -540,12 +540,14 @@ def _make_cache_flush_plot(
             indices = [d.relative_time for d in data]
             heights = [d.flushed_count for d in data]
             widths = [d.duration_secs for d in data]
-            print(indices)
-            print(heights)
-            print(widths)
+            print(f"Time: {indices}")
+            print(f"Coins flushed: {heights}")
+            print(f"Duration: {widths}")
+            print()
             ax.bar(indices, heights, width=widths, label=target.name, alpha=0.5)
 
         ax.set(ylabel='Coins count')
+        ax.legend()
 
     plt.tight_layout(rect=[0, 0.1, 1, 0.92])
     txt = plt.figtext(

@@ -49,7 +49,7 @@ def get_flush_times(filehandle) -> t.List[FlushEvent]:
             line_time = parse_date(line.split()[0])
 
             times.append(FlushEvent(
-                relative_time=(line_time - start_time).seconds,
+                relative_time=(line_time - start_time).total_seconds(),
                 duration_secs=float(groups['secs']),
                 flushed_count=int(groups['count']),
                 flushed_kb=int(groups['kb']),
