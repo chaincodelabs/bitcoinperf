@@ -458,7 +458,7 @@ def bench_pr(pr_num: str,
         sys.exit(1)
 
     start_height = 500_000
-    end_height = 500_050
+    end_height = start_height + num_blocks
 
     peer_args: t.Dict[str, t.Union[str, Path]] = {}
 
@@ -493,23 +493,24 @@ def bench_pr(pr_num: str,
 
     results: t.List[benchmarks.Benchmark] = []
 
-    for i, ts in enumerate([targets]):
-        for target in ts:
-            for compiler in config.Compilers:
-                git.checkout_in_dir(workdir / 'bitcoin', target)
+    if run_micros:
+        for i, ts in enumerate([targets]):
+            for target in ts:
+                for compiler in config.Compilers:
+                    git.checkout_in_dir(workdir / 'bitcoin', target)
 
-                build = benchmarks.Build(
-                    cfg, build_config, compiler, target, i)
-                build.run(cfg, build_config)
-                assert build.gitco
-                results.append(build)
+                    build = benchmarks.Build(
+                        cfg, build_config, compiler, target, i)
+                    build.run(cfg, build_config)
+                    assert build.gitco
+                    results.append(build)
 
-                micro_conf = config.BenchMicrobench()
-                micro = benchmarks.Microbench(
-                    cfg, micro_conf, compiler, target, i)
-                micro.run(cfg, micro_conf)
-                assert micro.gitco
-                results.append(micro)
+                    micro_conf = config.BenchMicrobench()
+                    micro = benchmarks.Microbench(
+                        cfg, micro_conf, compiler, target, i)
+                    micro.run(cfg, micro_conf)
+                    assert micro.gitco
+                    results.append(micro)
 
     # Only do IBD benches with gcc since they're long and we ship binaries
     # built with gcc.
