@@ -20,7 +20,7 @@ DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -qq -y \
   libboost-chrono-dev libboost-program-options-dev libboost-test-dev \
   libboost-thread-dev \
   clang \
-  git wget time python3-dev python3-pip
+  git wget time python3-dev python3-pip curl
 
 if ! which python3.8; then
   PY_VERSION=3.8.3
@@ -28,7 +28,7 @@ if ! which python3.8; then
   $SUDO apt update -qq
   $SUDO apt-get install -y -qq \
     build-essential zlib1g-dev libncurses5-dev libgdbm-dev \
-    libnss3-dev libssl-dev libreadline-dev libffi-dev curl
+    libnss3-dev libssl-dev libreadline-dev libffi-dev
   cd /tmp
   curl -O https://www.python.org/ftp/python/${PY_VERSION}/Python-${PY_VERSION}.tar.xz
   tar -xf Python-${PY_VERSION}.tar.xz
