@@ -262,6 +262,7 @@ class Microbench(Benchmark):
             cmd_str += " -filter='{}'".format(bench_cfg.filter)
 
         # TODO: use sh.Command, report peak memory usage - maybe per bench?
+        cmd_str += " -output_csv=/tmp/microbench > /dev/null && cat /tmp/microbench"
 
         microbench_ps = popen(cmd_str)
         (microbench_stdout,
