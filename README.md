@@ -93,7 +93,7 @@ $ ./bin/dev up codespeed
 
 $ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.dev.yml
 
-$ ./bin/dev runbench bitcoinperf examples/smoketest.yml
+$ ./bin/dev runbench bitcoinperf run examples/smoketest.yml
 ```
 
 Navigate to http://localhost:8000/ to see results reported to codespeed.
