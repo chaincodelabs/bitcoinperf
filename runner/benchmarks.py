@@ -173,7 +173,7 @@ class MakeCheck(Benchmark):
     def _run(self, cfg, bench_cfg):
         cmd = f"make -j {bench_cfg.num_jobs} check"
         self.results.title = f'Make check (j={bench_cfg.num_jobs})'
-        self._try_execute_and_report(cmd, num_tries=3, executable='make')
+        self._try_execute_and_report(cmd, num_tries=3)
 
 
 class FunctionalTests(Benchmark):
@@ -183,8 +183,7 @@ class FunctionalTests(Benchmark):
     def _run(self, cfg, bench_cfg):
         cmd = "./test/functional/test_runner.py"
         self.results.title = 'Functional tests'
-        self._try_execute_and_report(
-            cmd, num_tries=3, executable='functional-test-runner')
+        self._try_execute_and_report(cmd, num_tries=3)
 
 
 class Microbench(Benchmark):
