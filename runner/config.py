@@ -233,10 +233,22 @@ class BenchIbdFromLocal(Bench):
 
 
 class BenchIbdRangeFromLocal(Bench):
-    src_datadir: ExistingDatadir
+    # If not specified, will check the config_path to see if we have base_datadirs
+    # available.
+    src_datadir: Op[ExistingDatadir]
     start_height: PositiveInt = 0
     end_height: Op[PositiveInt]
     time_heights: Op[t.List[PositiveInt]] = None
+
+    @validator('src_datadir', pre=True, always=True)
+    def find_src_datadir(cls, v):
+        pruned_500k = base_datadirs / 'pruned-500k'
+        if not v and pruned_500k.exists():
+            logger.info(
+                'No src_datadir specified for BenchIbdRangeFromLocal - '
+                'defaulting to found pruned-500k datadir.')
+            return pruned_500k
+        return Path(v)
 
 
 class BenchReindex(Bench):
