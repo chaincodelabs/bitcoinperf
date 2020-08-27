@@ -46,6 +46,7 @@ def cd(*args, **kwargs):
 
 
 def rm(path: Path):
+    logger.debug(f"rm {path}")
     if path.is_symlink():
         path.unlink()
     elif path.is_dir():
@@ -221,6 +222,7 @@ def run(cmd: str,
         kwargs['stdout'] = subprocess.DEVNULL
         kwargs['stderr'] = subprocess.DEVNULL
 
+    logger.debug("Running cmd '%s': '%s'", cmd, kwargs)
     r = RunReturn.from_std(subprocess.run(cmd, **kwargs))
 
     if not r.ok:
