@@ -73,7 +73,7 @@ def _startup_assertions(cfg):
 def _cleanup_tmpfiles():
     """Remove temporary bitcoinperf directories older than 3 days."""
     # TODO parameterize this
-    sh.run(r'find /tmp/bitcoinperf-* -mtime +3 -exec rm -rf {} \;')
+    sh.run(r'find %s/* -type d -mtime +3 -exec rm -rf {} \;' % config.workdir_path)
     sh.run(r'find /tmp/test_runner_* -mtime +3 -exec rm -rf {} \;')
 
 
