@@ -97,6 +97,8 @@ def run_full_suite(cfg):
         logger.warning("Couldn't resolve git targets: %s", bad_targets)
         return
 
+    config.link_latest_run(cfg)
+
     for target in cfg.to_bench:
         assert target.gitco
         G.gitco = target.gitco

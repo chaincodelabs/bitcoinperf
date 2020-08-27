@@ -1,9 +1,9 @@
 import socket
 import os
+import random
 import datetime
 import multiprocessing
 import re
-import tempfile
 from typing import Optional as Op
 import typing as t
 from enum import Enum
@@ -360,8 +360,8 @@ class Config(BaseModel):
     @validator('workdir', pre=True, always=True)
     def mk_workdir(cls, v):
         if not v:
-            now = datetime.datetime.utcnow().isoformat()
-            rand = util.sha256()[:8]
+            now = datetime.datetime.utcnow().isoformat().split('.')[0].replace(':', '')
+            rand = util.sha256(str(random.random()))[:8]
             name = f'{now}-{rand}'
             path = Path(workdir_path / name)
             path.mkdir()
@@ -398,3 +398,10 @@ def load(content: t.Union[Path, str]) -> Config:
         content = content.read_text()
 
     return Config(**yaml.load(content), Loader=yaml.Loader)
+
+
+def link_latest_run(conf: Config):
+    """Symlink a shortcut to the latest run."""
+    latest = workdir_path / 'latest'
+    latest.unlink(missing_ok=True)
+    latest.symlink_to(conf.workdir, target_is_directory=True)
