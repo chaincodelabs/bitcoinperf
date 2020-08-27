@@ -75,7 +75,7 @@ class Benchmark(abc.ABC):
     @property
     def artifacts_dir(self) -> Path:
         """A place to stash various artifacts from the benchmark."""
-        if not getattr(self, '__artifacts_dir', None):
+        if not getattr(self, '_artifacts_dir', None):
             prefix = f'artifacts-{self.id}-{self.gitco.ref}'
             idx = len(list(self.cfg.workdir.glob(prefix + '*')))
 
@@ -84,8 +84,8 @@ class Benchmark(abc.ABC):
 
             path = self.cfg.workdir / (prefix + f'.{idx}')
             path.mkdir()
-            self.__artifacts_dir = path
-        return self.__artifacts_dir
+            self._artifacts_dir = path
+        return self._artifacts_dir
 
     def run(self, cfg, bench_cfg) -> None:
         """Called externally."""
