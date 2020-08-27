@@ -7,18 +7,18 @@ G = Namespace()
 
 # The git checkout currently being benched. Made global for easy reference
 # from the logger.
-G.gitco: 'GitCheckout' = None
+G.gitco: 'GitCheckout' = None  # type: ignore # noqa: F821
 
 # The current benchmark being run.
-G.bench: 'Benchmark' = None
+G.bench: 'Benchmark' = None  # type: ignore # noqa: F821
 
 # The current benchmark being run.
-G.benchmark: 'Benchmark' = None
+G.benchmark: 'Benchmark' = None  # type: ignore # noqa: F821
 
 # Did we acquire the system-wide lockfile?
-G.lockfile_held: bool = False
+G.lockfile_held: bool = False  # type: ignore
 
-G.slack: 'SlackClient' = None
+G.slack: 'SlackClient' = None  # type: ignore # noqa: F821
 
 # The number of remaining run counts:
 # {
@@ -27,4 +27,4 @@ G.slack: 'SlackClient' = None
 #   },
 #   ref2: { ...  }
 # }
-G.run_counts: t.Dict['GitCheckout', t.Dict['Benchmark', int]] = {}
+G.run_counts: t.Dict['GitCheckout', t.Dict['Benchmark', int]] = {}  # type: ignore # noqa

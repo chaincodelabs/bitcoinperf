@@ -113,7 +113,7 @@ def run_reindex(seed, args):
         # 'b4a1da9ef8e4b673c290d5b882527e627ae1b43a',
         # 'laanwj/2019_11_prevector',
         '2019-12-partial-flush',
-        'e354db787790b84b0b3f34cc55b65446c71e4fa2', # base of partial-flush
+        'e354db787790b84b0b3f34cc55b65446c71e4fa2',  # base of partial-flush
     ]
 
     outd = {}

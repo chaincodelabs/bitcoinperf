@@ -36,7 +36,8 @@ class Benchmark(abc.ABC):
         self.run_idx = run_idx
         self.bench_cfg = bench_cfg
         self.compiler = compiler
-        self.gitco = copy.copy(target.gitco)
+        assert target.gitco
+        self.gitco: config.GitCheckout = copy.copy(target.gitco)
         self.target = target
         self.id: str = self.id_format.format(
             self=self, cfg=cfg, G=G, bench_cfg=self.bench_cfg)
@@ -75,6 +76,8 @@ class Benchmark(abc.ABC):
     @property
     def artifacts_dir(self) -> Path:
         """A place to stash various artifacts from the benchmark."""
+        assert self.cfg.workdir
+
         if not getattr(self, '_artifacts_dir', None):
             prefix = f'artifacts-{self.id}-{self.gitco.ref}'
             idx = len(list(self.cfg.workdir.glob(prefix + '*')))
@@ -308,6 +311,8 @@ class _IbdBench(Benchmark):
         pass
 
     def _get_codespeed_bench_name(self, current_height) -> str:
+        assert isinstance(self.bench_cfg, config.IBDishBench)
+
         if self.bench_cfg.start_height:
             fmt = "{self.name}.{start_height}.{current_height}"
         else:
@@ -483,8 +488,8 @@ class _IbdBench(Benchmark):
             )
             results.report_result(
                 self,
-                self._get_codespeed_bench_name(report_at_height)
-                + '.mem-usage',
+                self._get_codespeed_bench_name(report_at_height) +
+                '.mem-usage',
                 client_node.cmd.memusage_kib(),
                 extra_data={'height': last_height_seen, **extra_data},
             )

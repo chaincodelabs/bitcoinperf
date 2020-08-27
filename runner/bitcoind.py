@@ -348,6 +348,7 @@ def get_synced_node(peer_config: config.SyncedPeer,
     if peer_config.gitref and not _built_peer_cache.get(peer_config):
         logger.info(f'Starting build for synced peer ({peer_config})')
         target = config.Target(gitref=peer_config.gitref, rebase=False)
+        assert peer_config.repodir
         [co], _ = git.resolve_targets(peer_config.repodir, [target])
         git.checkout_in_dir(peer_config.repodir, target)
         builder = BuildManager(peer_config.repodir.parent, clean=False)
@@ -453,8 +454,8 @@ class BuildManager:
         conf = sh.run(
             configure_prefix +
             './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-            'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
-            + ' {} '.format(target.configure_args) +
+            'BDB_CFLAGS="-I${BDB_PREFIX}/include" ' +
+            ' {} '.format(target.configure_args) +
             # Ensure ccache is disabled so that subsequent make runs
             # are timed accurately.
             '--disable-ccache ' + boostflags)

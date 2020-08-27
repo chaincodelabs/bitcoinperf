@@ -6,12 +6,17 @@ import multiprocessing
 import re
 from typing import Optional as Op
 import typing as t
+from typing import TYPE_CHECKING
 from enum import Enum
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, validator, PositiveInt
-from pydantic.dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from dataclasses import dataclass
+else:
+    from pydantic.dataclasses import dataclass
 
 from . import logging, util
 
@@ -155,8 +160,8 @@ class WriteablePath(Path):
 
 
 class SyncedPeer(BaseModel):
-    datadir: ExistingDatadir = ''
-    repodir: RepoDir = ''
+    datadir: Op[ExistingDatadir] = None
+    repodir: Op[RepoDir] = None
     bitcoind_extra_args: str = ''
     # or
     address: Op[NodeAddr] = None
@@ -198,47 +203,44 @@ class Codespeed(BaseModel):
 
 class Bench(BaseModel):
     enabled: bool = True
-    run_count: PositiveInt = 1
+    run_count: PositiveInt = PositiveInt(1)
 
 
 class BenchBuild(Bench):
-    num_jobs: Op[PositiveInt] = DEFAULT_NPROC
-    configure_args: EnvStr = ""
+    num_jobs: Op[PositiveInt] = PositiveInt(DEFAULT_NPROC)
+    configure_args: EnvStr = EnvStr("")
 
 
 class BenchUnittests(Bench):
-    num_jobs: Op[PositiveInt] = DEFAULT_NPROC
+    num_jobs: Op[PositiveInt] = PositiveInt(DEFAULT_NPROC)
 
 
 class BenchFunctests(Bench):
-    num_jobs: Op[PositiveInt] = DEFAULT_NPROC
+    num_jobs: Op[PositiveInt] = PositiveInt(DEFAULT_NPROC)
 
 
 class BenchMicrobench(Bench):
     filter: str = ''
 
 
-class BenchIbdFromNetwork(Bench):
-    start_height: PositiveInt = 0
+class IBDishBench(Bench):
+    start_height: int = 0
     end_height: Op[PositiveInt] = None
     time_heights: Op[t.List[PositiveInt]] = None
+
+
+class BenchIbdFromNetwork(IBDishBench):
     stash_datadir: Op[WriteablePath] = None
 
 
-class BenchIbdFromLocal(Bench):
-    start_height: PositiveInt = 0
-    end_height: Op[PositiveInt] = None
-    time_heights: Op[t.List[PositiveInt]] = None
+class BenchIbdFromLocal(IBDishBench):
     stash_datadir: Op[WriteablePath] = None
 
 
-class BenchIbdRangeFromLocal(Bench):
+class BenchIbdRangeFromLocal(IBDishBench):
     # If not specified, will check the config_path to see if we have base_datadirs
     # available.
     src_datadir: Op[ExistingDatadir]
-    start_height: PositiveInt = 0
-    end_height: Op[PositiveInt]
-    time_heights: Op[t.List[PositiveInt]] = None
 
     @validator('src_datadir', pre=True, always=True)
     def find_src_datadir(cls, v):
@@ -251,23 +253,17 @@ class BenchIbdRangeFromLocal(Bench):
         return Path(v)
 
 
-class BenchReindex(Bench):
+class BenchReindex(IBDishBench):
     # TODO:
     # If None, we'll use the resulting datadir from the previous benchmark.
     src_datadir: Op[Path] = None
-    start_height: PositiveInt = 0
-    end_height: PositiveInt = None
-    time_heights: Op[t.List[PositiveInt]] = None
     stash_datadir: Op[WriteablePath] = None
 
 
-class BenchReindexChainstate(Bench):
+class BenchReindexChainstate(IBDishBench):
     # TODO:
     # If None, we'll use the resulting datadir from the previous benchmark.
     src_datadir: Op[Path] = None
-    start_height: PositiveInt = 0
-    end_height: PositiveInt = None
-    time_heights: Op[t.List[PositiveInt]] = None
     stash_datadir: Op[WriteablePath] = None
 
 
@@ -288,12 +284,12 @@ class Target(BaseModel):
     Data that uniquely identifies a bitcoin configuration to benchmark.
     """
     gitref: EnvStr
-    gitremote: EnvStr = "origin"
-    bitcoind_extra_args: EnvStr = ""
-    configure_args: EnvStr = ""
+    gitremote: EnvStr = EnvStr("origin")
+    bitcoind_extra_args: EnvStr = EnvStr("")
+    configure_args: EnvStr = EnvStr("")
 
     # Used for display in output.
-    name: Op[EnvStr] = ""
+    name: Op[EnvStr] = None
 
     # If True, rebase this branch on top of latest master.
     rebase: bool = True
@@ -368,7 +364,7 @@ class Config(BaseModel):
             return path
         return Path(v)
 
-    @validator('benches', whole=True)
+    @validator('benches')
     def check_peer(cls, v, values, **kwargs):
         if v.ibd_from_local or v.ibd_range_from_local:
             if not values.get('synced_peer'):
@@ -404,4 +400,5 @@ def link_latest_run(conf: Config):
     """Symlink a shortcut to the latest run."""
     latest = workdir_path / 'latest'
     latest.unlink(missing_ok=True)
+    assert conf.workdir
     latest.symlink_to(conf.workdir, target_is_directory=True)

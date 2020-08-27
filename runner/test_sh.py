@@ -1,28 +1,22 @@
-import os
-from pathlib import Path
-
 import pytest
 
-from . import sh, config
+from . import sh
 
 
 def test_run():
-    (stdout, stderr, code) = sh.run("ls -lah .")
+    ret = sh.run("ls -lah .")
 
     # returncode
-    assert code == 0
-    assert stderr.decode() == ""
-    assert stdout.decode()
+    assert ret.returncode == 0
+    assert ret.stderr == ""
+    assert ret.stdout
 
     with pytest.raises(RuntimeError):
-        (stdout, stderr, code) = sh.run("cat hopefullynonexistentfile")
+        ret = sh.run("cat hopefullynonexistentfile", check=True)
 
-    (stdout, stderr, code) = sh.run(
-        "cat hopefullynonexistentfile",
-        check_returncode=False,
-    )
+    ret = sh.run("cat hopefullynonexistentfile")
 
     # returncode
-    assert code != 0
-    assert stderr.decode()
-    assert stdout.decode() == ""
+    assert ret.returncode != 0
+    assert 'No such file or directory' in ret.stderr
+    assert ret.stdout == ""

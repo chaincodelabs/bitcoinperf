@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from .config import Config, Target
 from .benchmarks import Benchmark
 from .logging import get_logger
+from . import results
 
 logger = get_logger()
 
@@ -37,13 +38,16 @@ def get_times_table(name_to_times_map):
 
 class BenchVal(namedtuple('BenchVal', 'name,values')):
     @property
-    def count(self): return len(self.values)
+    def count(self):
+        return len(self.values)
 
     @property
-    def avg(self): return sum(self.values) / self.count
+    def avg(self):
+        return sum(self.values) / self.count
 
     @property
-    def stddev(self): return numpy.std(self.values)
+    def stddev(self):
+        return numpy.std(self.values)
 
     @property
     def summary_str(self):
@@ -72,28 +76,32 @@ class BenchList(t.List[Benchmark]):
             [i.results.total_time_secs for i in self],
         )
 
-    def peak_rss_result(self) -> t.Optional[BenchVal]:
+    def peak_rss_result(self) -> BenchVal:
         if not self[0].results.peak_rss_kb:
             # Some benchmarks don't track peak RSS
-            return None
+            raise ValueError("no memory measurements")
 
         return BenchVal(
             total_mem_id(self[0].id),
             [i.results.peak_rss_kb for i in self]
         )
 
-    def microbench_result(self, microbench_name) -> t.Optional[BenchVal]:
+    def microbench_result(self, microbench_name) -> BenchVal:
         if not self[0].id.startswith('micro'):
-            return None
+            raise ValueError("only available for microbench runs")
 
-        return BenchVal(
-            total_time_id(microbench_name),
-            [i.results.bench_to_time[microbench_name] for i in self],
-        )
+        vals = []
+        for bench in self:
+            assert isinstance(bench.results, results.MicrobenchResults)
+            vals.append(bench.results.bench_to_time[microbench_name])
+
+        return BenchVal(total_time_id(microbench_name), vals)
 
 
 class GroupedRuns(t.Dict[str, t.Dict[Target, BenchList]]):
-
+    """
+    Keyed by benchmark IDs and mapping to a list of benchmarks executed per target.
+    """
     @property
     def bench_ids(self) -> t.List[str]:
         return list(self.keys())
@@ -105,10 +113,10 @@ class GroupedRuns(t.Dict[str, t.Dict[Target, BenchList]]):
 
     @property
     def target_names(self) -> t.List[str]:
-        return [i.name for i in self.targets]
+        return [str(i.name) for i in self.targets]
 
     @classmethod
-    def from_list(cls, in_list: [Benchmark]) -> 'GroupedRuns':
+    def from_list(cls, in_list: t.Sequence[Benchmark]) -> 'GroupedRuns':
         """
         Group bench runs by benchmark.id -> Target -> [list of benches].
 
@@ -159,12 +167,15 @@ def get_standard_results(runs: GroupedRuns) -> FlatResults:
         # Microbenches don't report memory
         if not bench_id.startswith('micro'):
             out[total_mem_id(bench_id)] = [
-                target_to_benchlist[t].peak_rss_result() for t in runs.targets]
+                target_to_benchlist[target].peak_rss_result()
+                for target in runs.targets]
 
         if bench_id.startswith('micro'):
             # Enumerate out all microbench results
             first_bench = list(target_to_benchlist.values())[0][0]
-            microbench_names = list(first_bench.results.bench_to_time.keys())
+            first_result = first_bench.results
+            assert isinstance(first_result, results.MicrobenchResults)
+            microbench_names = list(first_result.bench_to_time.keys())
 
             compiler = first_bench.compiler
             for name in microbench_names:
@@ -187,6 +198,10 @@ def get_standard_results(runs: GroupedRuns) -> FlatResults:
 
 
 def _condense_bitcoin_cmd(cmd_in: str) -> str:
+    """
+    Generate a characteristic string of a bitcoind command, stripping out things
+    that are not relevant to the benchmark.
+    """
     out_str = ''
     ignore_list = (
         '-rpcport=', '-port=', '-datadir=', '-maxtipage=',
@@ -209,7 +224,7 @@ def _condense_bitcoin_cmd(cmd_in: str) -> str:
     return out_str.strip()
 
 
-def print_comparative_times_table(cfg, runs: GroupedRuns, pfile=sys.stdout):
+def print_comparative_times_table(runs: GroupedRuns, config=None, pfile=sys.stdout):
     writer = pytablewriter.MarkdownTableWriter()
     vs_str = ("{}" + (" vs. {}" * (len(runs.target_names) - 1))).format(
         *runs.target_names)
@@ -251,7 +266,7 @@ def print_comparative_times_table(cfg, runs: GroupedRuns, pfile=sys.stdout):
 
     out = '### ' + vs_str + " (absolute)\n"
     out += writer.dumps() + '\n\n'
-    print(out)
+    pfile.write(out)
 
     writer.value_matrix = []
 
@@ -266,11 +281,13 @@ def print_comparative_times_table(cfg, runs: GroupedRuns, pfile=sys.stdout):
 
     out2 = '### ' + vs_str + " (relative)\n"
     out2 += writer.dumps() + '\n\n'
-    print(out2)
-    output_path = cfg.results_dir / 'table.txt'
-    output_path.write_text(out0 + out + out2)
-    print()
-    print(f"This output has been written to {output_path}")
+    pfile.write(out2)
+
+    if config:
+        output_path = config.results_dir / 'table.txt'
+        output_path.write_text(out0 + out + out2)
+        print()
+        print(f"This output has been written to {output_path}")
 
 
 def make_plots(cfg: Config, runs: GroupedRuns):
@@ -359,10 +376,11 @@ def _format_command(cmd: str) -> str:
     return out
 
 
-def _get_dbcache(cmd: str) -> str:
+def _get_dbcache(cmd: str) -> t.Optional[str]:
     for i in cmd.split():
         if i.startswith('-dbcache='):
             return i.split('=')[-1]
+    return None
 
 
 def _make_ibd_type_plot(
@@ -407,11 +425,10 @@ def _make_ibd_type_plot(
         peak_mem_data.append(
             [kib_to_mb(b.results.peak_rss_kb) for b in benchlist])
 
-
     def add_iters(b, add=''):
         return b + add + " (x{})".format(num_runs)
 
-    dbcache = _get_dbcache(cmd_str)
+    # dbcache = _get_dbcache(cmd_str)
 
     f.suptitle(title, fontsize=12, fontfamily='sanserif')
 
@@ -423,7 +440,7 @@ def _make_ibd_type_plot(
     ax2.set_title('Memory')
     ax2.boxplot(peak_mem_data)
     ax2.set_title('Peak memory usage')
-    ax2.set_xticklabels([i[:22] for i in target_names])
+    ax2.set_xticklabels([str(i)[:22] for i in target_names])
     ax2.set(ylabel='MB')
 
     for i, axis_pair in enumerate(axis_pairs[1:]):
@@ -437,14 +454,15 @@ def _make_ibd_type_plot(
             assert run_data[target] == benchlist
 
             # For axis_pair i, we only care about the i'th bench result.
-            results = benchlist[i].results
+            bench_results = benchlist[i].results
+            assert isinstance(bench_results, results.IbdResults)
 
             timeseries_height_data = []
             timeseries_mem_data = []
             timeseries_fds_data = []
             timeseries_cpu_data = []
 
-            for height, hdata in results.height_to_data.items():
+            for height, hdata in bench_results.height_to_data.items():
                 timeseries_height_data.append((hdata.time_secs, height))
                 timeseries_mem_data.append(
                     (hdata.time_secs, kib_to_mb(hdata.rss_kb)))
@@ -457,7 +475,7 @@ def _make_ibd_type_plot(
             height_ax.plot(x, y, label=target.name)
 
             x = [i[0] for i in timeseries_mem_data]
-            y = [i[1] for i in timeseries_mem_data]
+            y = [int(i[1]) for i in timeseries_mem_data]
             mem_ax.plot(x, y, label=target.name)
 
         height_ax.set(ylabel='Height')
@@ -505,7 +523,8 @@ def _make_cache_flush_plot(
     cmd_str: str = ''
     title: str = ''
 
-    targets_to_flush_list = [{} for _ in range(num_runs)]
+    targets_to_flush_list: t.List[t.Dict[Target, t.List[results.FlushEvent]]] = [
+        {} for _ in range(num_runs)]
 
     # Benchlist per target in canonical order (due to sorted-by-default dicts)
     for target, benchlist in zip(targets, run_data.values()):
@@ -519,6 +538,7 @@ def _make_cache_flush_plot(
             title = benchlist[0].results.title
 
         for i, b in enumerate(benchlist):
+            assert isinstance(b.results, results.IbdResults)
             targets_to_flush_list[i][target] = b.results.flush_events
 
     def add_iters(b, add=''):

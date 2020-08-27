@@ -1,5 +1,6 @@
 import requests
 import typing as t
+from typing import Optional as Op
 from dataclasses import dataclass, field
 
 from .git import GitCheckout
@@ -9,13 +10,13 @@ from .logparse import FlushEvent
 logger = get_logger()
 
 
-ALL_RUNS: t.List['Benchmarks'] = []
+ALL_RUNS: t.List['Benchmarks'] = []  # type: ignore # noqa: F821
 HWINFO: t.Dict = {}
 
 
 class Reporters:
     """A container for Reporter instances - to be populated in runner/main"""
-    codespeed = None
+    codespeed: Op['CodespeedReporter'] = None
     log = None
 
 
@@ -32,11 +33,11 @@ class Results:
     title: str = ''
 
     # In seconds
-    total_time_secs: float = None
-    peak_rss_kb: int = None
+    total_time_secs: Op[float] = None
+    peak_rss_kb: Op[int] = None
 
     # See hwinfo.parse_configure_log()
-    configure_info: dict = None
+    configure_info: Op[dict] = None
 
 
 class HeightData(t.NamedTuple):

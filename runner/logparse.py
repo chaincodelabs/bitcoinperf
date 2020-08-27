@@ -5,11 +5,10 @@ Tools for parsing bitcoin logs.
 import datetime
 import re
 import typing as t
-from pathlib import Path
 
 
 class FlushEvent(t.NamedTuple):
-    relative_time: int
+    relative_time: float
     duration_secs: float
     flushed_count: int
     flushed_kb: int

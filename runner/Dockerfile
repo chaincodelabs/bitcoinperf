@@ -14,6 +14,6 @@ RUN ./contrib/install_db4.sh . && \
 WORKDIR /code
 COPY setup.py /code/
 COPY runner /code/runner
-RUN pip3 install -r /code/runner/requirements.txt && \
-  pip3 install -e . && \
-  pip3 install pytest ipython
+RUN pip install -r /code/runner/requirements.txt && \
+  pip install -e . && \
+  pip install -r /code/runner/requirements-dev.txt

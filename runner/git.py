@@ -1,4 +1,3 @@
-import os
 import shutil
 import typing as t
 from pathlib import Path

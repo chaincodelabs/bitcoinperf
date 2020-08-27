@@ -228,7 +228,7 @@ def setup():
     """
     Run a guided setup of the fixture data needed to benchmark.
     """
-    from .thirdparty import color as c
+    from .thirdparty import color as c  # type: ignore
 
     catchphrase = random.choice([
         "let's be honest, it's basically your only option",
@@ -238,7 +238,7 @@ def setup():
         "get out, before the rats eat you!",
     ])
 
-    print(f"""
+    print(fr"""
   _    _ _          _                     __
  | |__(_) |_ __ ___(_)_ _  _ __  ___ _ _ / _|
  | '_ \ |  _/ _/ _ \ | ' \| '_ \/ -_) '_|  _|
@@ -310,7 +310,7 @@ def setup():
             print(f'Cloning from {url}... ', end='')
             sys.stdout.flush()
             sh.run(f'git clone --depth 1 {url} {config.peer_repo}')
-            print(c.green(f'finished!'))
+            print(c.green('finished!'))
             sys.stdout.flush()
             time.sleep(0.8)
         else:
@@ -334,7 +334,7 @@ def setup():
                550,000).
         """))))
 
-        print(c.cyan(c.bold(dedent(f"""
+        print(c.cyan(c.bold(dedent("""
             !! Alternatively you can specify a network address to use in lieu
                of a local peer with the `--peer-address` flag. Bitcoinperf
                will (obviously) not manage the setup/teardown of this peer.
@@ -346,7 +346,7 @@ def setup():
         config.base_datadirs.mkdir()
 
     if not config.pruned_500k_datadir.exists():
-        print(dedent(f'''
+        print(dedent('''
             To do meaningful benchmarking, we often have to look at a region
             of the chain that is well past the first few hundred thousand
             blocks, since these blocks are not characteristic of where the
@@ -362,7 +362,7 @@ def setup():
         if yn(prompt):
             url = 'https://storage.googleapis.com/chaincode-bitcoinperf/pruned_500k.tar.gz'  # noqa
             print(f'Downloading and decompressing {url}...')
-            print(f'└─ this will take about 15 minutes')
+            print('└─ this will take about 15 minutes')
             sh.run(f'cd {config.base_datadirs} && curl {url} | tar xvz')
             sh.run(
                 f'cd {config.base_datadirs} && '
@@ -406,7 +406,7 @@ def setup():
          {username}     ALL = NOPASSWD: /sbin/swapoff -a
     """)))
 
-    print(c.green(dedent(f"""
+    print(c.green(dedent("""
         cool, have fun.
 
         `bitcoinperf bench-pr $PR_NUMBER` is probably what you want.
@@ -449,7 +449,7 @@ def bench_pr(pr_num: str,
         config.Target(
             name=f"#{pr_num}", gitref=f'pr/{pr_num}', rebase=False),
         config.Target(
-            name=git.MERGEBASE_REF, gitref=f'master', gitremote='origin',
+            name=git.MERGEBASE_REF, gitref='master', gitremote='origin',
             rebase=False),
     ]
 
@@ -616,7 +616,7 @@ def _print_results(cfg: config.Config = None,
         timestr = output.get_times_table(grouped)
         print(timestr)
     else:
-        output.print_comparative_times_table(cfg, grouped)
+        output.print_comparative_times_table(grouped, config=cfg)
         output.make_plots(cfg, grouped)
 
 
