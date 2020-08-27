@@ -1,5 +1,6 @@
 import socket
 import os
+import datetime
 import multiprocessing
 import re
 import tempfile
@@ -30,6 +31,10 @@ BENCH_NAMES = {
 # TODO shoulddn't be creating files on import
 config_path = Path.home() / '.bitcoinperf'
 config_path.mkdir(exist_ok=True)
+
+# Where run data is kept; this used to be under /tmp/bitcoinperf-*.
+workdir_path = config_path / 'runs'
+workdir_path.mkdir(exist_ok=True)
 
 # Where the synced peer optionally resides.
 peer_path = config_path / 'peer'
@@ -343,7 +348,12 @@ class Config(BaseModel):
     @validator('workdir', pre=True, always=True)
     def mk_workdir(cls, v):
         if not v:
-            return Path(tempfile.mkdtemp(prefix='bitcoinperf-'))
+            now = datetime.datetime.utcnow().isoformat()
+            rand = util.sha256()[:8]
+            name = f'{now}-{rand}'
+            path = Path(workdir_path / name)
+            path.mkdir()
+            return path
         return Path(v)
 
     @validator('benches', whole=True)

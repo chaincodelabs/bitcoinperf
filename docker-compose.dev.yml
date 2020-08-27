@@ -15,6 +15,7 @@ services:
       # host machine that contains a synced datadir.
       - /data/bitcoin_bench:/data/bitcoin_bench
       # - /data/bitcoin_pruned_500k:/data/bitcoin_pruned_500k
+      - /data/bitcoinperf:/root/.bitcoinperf
 
   codespeed:
     ports:
