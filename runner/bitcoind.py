@@ -384,6 +384,7 @@ class BuildManager:
         self.workdir = workdir
         self.cache_path = cache_path
         self.clean = clean
+        self.repo_path = self.workdir / 'bitcoin'
 
     def build(self,
               target: config.Target,
@@ -397,15 +398,14 @@ class BuildManager:
         Returns: a completed Command if we did a build, None if we used cache.
         """
         logger.info(f"Starting build for {target.cache_key}")
-        repodir = self.workdir / 'bitcoin'
-        makefile = repodir / 'Makefile'
-        sh.cd(repodir)
+        makefile = self.repo_path / 'Makefile'
+        sh.cd(self.repo_path)
 
         if makefile.exists():
             logger.info('Running make clean')
             sh.run('make clean')
 
-        git.checkout_in_dir(repodir, target)
+        git.checkout_in_dir(self.repo_path, target)
 
         # Sanity check - compare the commit message as an extra assurance.
         msg = git.get_commit_msg('HEAD')
@@ -413,7 +413,7 @@ class BuildManager:
         if msg != target.gitco.commit_msg:
             raise RuntimeError(
                 "checkout {} has bad HEAD (expected '{}', got '{}')!".format(
-                    repodir, target.gitco.commit_msg, msg))
+                    self.repo_path, target.gitco.commit_msg, msg))
 
         num_jobs = num_jobs or config.DEFAULT_NPROC
         # Important that we set this envvar before potentially early-exiting
@@ -424,11 +424,11 @@ class BuildManager:
         if self.cache_path and cache.restore(target):
             return None
 
-        if not (repodir / 'db4').exists():
+        if not (self.repo_path / 'db4').exists():
             logger.info("Retrieving db4")
             assert sh.run("./contrib/install_db4.sh .").ok
 
-        if not (repodir / 'configure').exists():
+        if not (self.repo_path / 'configure').exists():
             logger.info("Running autogen.sh")
             assert sh.run("./autogen.sh").ok
 
@@ -437,7 +437,7 @@ class BuildManager:
             configure_prefix = 'CC=clang CXX=clang++ '
 
         # Ensure build is clean.
-        makefile_path = repodir / 'Makefile'
+        makefile_path = self.repo_path / 'Makefile'
         if makefile_path.is_file() and self.clean:
             sh.run('make distclean')
 
@@ -468,11 +468,14 @@ class BuildManager:
         cmd.start()
         cmd.join()
 
-        _assert_version(repodir, target.gitco.sha)
+        _assert_version(self.repo_path, target.gitco.sha)
 
         if cmd.returncode == 0 and self.cache_path:
             cache.save(target)
             cache.clean()
+        elif self.cache_path:
+            logger.warning(
+                "Unable to save build %s to cache-path %s", target, self.cache_path)
 
         # cmd error will be handled by caller
         return cmd
@@ -485,6 +488,7 @@ class BuildCache:
     """
     def __init__(self, workdir: Path, cachedir: Path = None):
         self.workdir = workdir
+        self.repo_path = workdir / 'bitcoin'
         self.cachedir = cachedir or (workdir / 'build-cache')
         self.cachedir.mkdir(exist_ok=True)
 
@@ -508,8 +512,7 @@ class BuildCache:
 
         Returns True if we restored the build from cache.
         """
-        repodir = self.workdir / 'bitcoin'
-        srcdir = repodir / 'src'
+        srcdir = self.repo_path / 'src'
         assert target.gitco
         cache = self._get_cache_path(target)
         cache_bitcoind = cache / 'bitcoind'
@@ -535,7 +538,7 @@ class BuildCache:
         os.symlink(cache_bitcoincli, srcdir / 'bitcoin-cli')
         os.symlink(cache_bench, srcdir / 'bench' / 'bench_bitcoin')
 
-        _assert_version(repodir, target.gitco.sha)
+        _assert_version(self.repo_path, target.gitco.sha)
         return True
 
     def clean(self):
