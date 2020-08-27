@@ -59,13 +59,13 @@ benches:
       - 500
       - 1_300
 
-  ibd_range_from_local:
-    start_height: 500_000
-    end_height: 500_500
-    src_datadir: /data/bitcoin_bench
-    time_heights:
-      - 500_250
-      - 500_350
+#   ibd_range_from_local:
+#     start_height: 500_000
+#     end_height: 500_500
+#     src_datadir: /data/bitcoin_bench
+#     time_heights:
+#       - 500_250
+#       - 500_350
 
   reindex:
     enabled: false
