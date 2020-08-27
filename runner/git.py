@@ -137,9 +137,9 @@ def resolve_targets(repo_path: Path,
         get_remote(remote)
 
     mergebase = [t for t in targets if MERGEBASE_REF in [t.name, t.gitref]]
-    others = [t for t in targets if MERGEBASE_REF not in [t.name, t.gitref]]
+    normal_refs = [t for t in targets if MERGEBASE_REF not in [t.name, t.gitref]]
 
-    for tar in others:
+    for tar in normal_refs:
         if not tar.gitref.startswith('pr/'):
             continue
 
@@ -153,11 +153,11 @@ def resolve_targets(repo_path: Path,
     # Special case to infer merge-base target if one exists.
     if mergebase:
         mergebase_target = mergebase[0]
-        if len(others) != 1:
+        if len(normal_refs) != 1:
             raise ValueError(
                 "can only process mergebase against one other target")
 
-        other = others[0]
+        other = normal_refs[0]
         mergebase_sha = get_git_mergebase(
             repo_path, other.gitremote, other.gitref)
 
@@ -166,13 +166,13 @@ def resolve_targets(repo_path: Path,
             remote='origin',
             sha=mergebase_sha,
             commit_msg=get_commit_msg(mergebase_sha),
-            name=f'origin/master (merge-base)',
+            name='origin/master (merge-base)',
         )
         checkouts.append(co)
         mergebase_target.gitco = co
 
     # Resolve all of the non-mergebase targets into GitCheckouts.
-    for tar in others:
+    for tar in normal_refs:
         ishex = is_hex(tar.gitref)
         bad = False
         msg = ''
@@ -185,6 +185,8 @@ def resolve_targets(repo_path: Path,
         else:
             sha_res = sh.run(f'git rev-parse {tar.gitremote}/{tar.gitref}')
             if not sha_res.ok:
+                logger.debug("Couldn't parse rev {tar.gitremote}/{tar.gitref}; "
+                             "trying {tar.gitref}")
                 # Fall back to just trying the ref, no remote. Sometimes for
                 # tags this is necessary.
                 sha_res = sh.run(f'git rev-parse {tar.gitref}')
@@ -198,6 +200,8 @@ def resolve_targets(repo_path: Path,
             logger.warning(f'ref not found: {tar.gitref}')
             bad_targets.append(tar)
             continue
+
+        sh.run(f"git checkout {sha}")
 
         # Handle requested rebase.
         if tar.rebase:
