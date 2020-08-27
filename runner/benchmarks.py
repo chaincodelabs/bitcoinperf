@@ -72,6 +72,21 @@ class Benchmark(abc.ABC):
         """Any teardown that should always happen after the benchmark."""
         pass
 
+    @property
+    def artifacts_dir(self) -> Path:
+        """A place to stash various artifacts from the benchmark."""
+        if not getattr(self, '__artifacts_dir', None):
+            prefix = f'artifacts-{self.id}-{self.gitco.ref}'
+            idx = len(list(self.cfg.workdir.glob(prefix + '*')))
+
+            if idx != self.run_idx:
+                logger.warning("Unexpected drift in run index from artifacts index")
+
+            path = self.cfg.workdir / (prefix + f'.{idx}')
+            path.mkdir()
+            self.__artifacts_dir = path
+        return self.__artifacts_dir
+
     def run(self, cfg, bench_cfg) -> None:
         """Called externally."""
         sh.drop_caches()
@@ -165,6 +180,10 @@ class Build(Benchmark):
         if cmd:  # i.e. if not cached
             self._report_results(cmd)
 
+        shutil.copyfile(
+            builder.repo_path / 'config.log', self.artifacts_dir / 'config.log')
+        logger.info('Configure log saved in %s', self.artifacts_dir / 'config.log')
+
 
 class MakeCheck(Benchmark):
     name = 'makecheck'
@@ -199,7 +218,7 @@ class Microbench(Benchmark):
         if bench_cfg.filter:
             cmd_str += " -filter='{}'".format(bench_cfg.filter)
 
-        outpath = self.cfg.workdir / f'microbench_{self.id}'
+        outpath = self.artifacts_dir / f'{self.id}_results'
         # TODO: use sh.Command, report peak memory usage - maybe per bench?
         cmd_str += f" -output_csv={outpath} > /dev/null && cat {outpath}"
 
@@ -522,10 +541,8 @@ class _IbdBench(Benchmark):
         # Copy logfile to results
         debuglogpath = self._get_datadir_path() / 'debug.log'
         if debuglogpath.exists():
-            debuglogname = 'debug.{}-{}.log'.format(
-                self.target.name, self.run_idx)
             shutil.copyfile(
-                debuglogpath, str(self.cfg.results_dir / debuglogname))
+                debuglogpath, str(self.artifacts_dir / 'debug.log'))
 
             with open(debuglogpath, 'r') as f:
                 self.results.flush_events = logparse.get_flush_times(f)
