@@ -1,0 +1,46 @@
+---
+
+# Cache a built bitcoin src directory and restore it from the cache on
+# subsequent runs.
+cache_build: true
+
+# If true, the first git clone will be cached and copied from as necessary.
+cache_git: true
+
+# Set to false to make cache dropping optional and bypass various safety checks.
+safety_checks: false
+
+compilers:
+  - gcc
+
+synced_peer:
+  # datadir: /data/bitcoin
+  # repodir: /home/james/src/bitcoin_bench
+  # bitcoind_extra_args: ''
+
+  # or, if over network
+  #
+  address: tanoshii.local:8333
+
+
+benches:
+                
+  microbench:
+    run_count: 2
+    
+  ibd_range_from_local:
+    run_count: 2
+    start_height: 500_000
+    end_height: 505_000
+
+
+to_bench:
+
+  - gitref: add_cfi_to_hardening
+    gitremote: fanquake
+    name: gcc-9 (add_cfi_to_hardening)
+    configure_args: 'CXX=g++-9 CC=gcc-9'
+
+  - gitref: master
+    name: gcc-8 (master)
+    configure_args: 'CXX=g++-8 CC=gcc-8'
