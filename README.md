@@ -1,6 +1,27 @@
-## Bitcoin Core performance monitor 📈
+## bitcoinperf
 
 [bitcoinperf.com](https://bitcoinperf.com)
+ 
+![nice things](./img/ibd.png)
+              
+---
+
+## tl;dr I want to bench a PR 
+
+This should probably be done on an otherwise idle system if you actually want
+to report the benchmarks.
+
+1. Clone this repo: `git clone https://github.com/chaincodelabs/bitcoinperf.git`
+1. Ensure you have Python 3.8 on your system (see `./bin/install.sh`).
+1. Peruse all the other stuff you should have installed in `./bin/install.sh`.
+1. `python3.8 -m pip install --user -e .`
+1. Follow all setup instructions: `bitcoinperf setup`
+1. Run the bench: `bitcoinperf bench-pr $YOUR_PR_NUM`
+  - This will run a comparative initial block download from block 500_000 to
+    (by default) block 501_000. It will spit out some pretty graphs and
+    statistics.
+
+---
 
 This repository consists of a few components
 
@@ -8,8 +29,6 @@ This repository consists of a few components
 - a [codespeed](https://github.com/chaincodelabs/codespeed) installation which
   collects and presents benchmarking results in a web interface, and
 - a Grafana interface for presenting the benchmark results.
-
-![nice things](./img/ibd.png)
 
 *It even uses matplotlib to generate graphs that look decent half the time.*
 
@@ -30,7 +49,7 @@ codespeed instance.
 
 ### Example local usage (no docker)
 
-You must have Python 3.7 or greater installed.
+You must have Python 3.8 or greater installed.
 
 ```sh
 # Obtain all the dependencies necessary to build Bitcoin Core as well as all
@@ -43,9 +62,14 @@ You must have Python 3.7 or greater installed.
 # If pip warns that the installation path is not in PATH, add it
 export PATH=$PATH:~/.local/bin
 
-# To run:
-# bitcoinperf [path to YAML config file]
-bitcoinperf examples/pr_compare.yml
+# Run the guided setup script
+bitcoinperf setup
+
+# To run a probably-relevant comparison for a certain pull request, run
+bitcoinperf bench-pr $PR_NUM
+
+# To run based upon YAML configuration, use
+bitcoinperf run examples/pr_compare.yml
 ```
 
 See the [examples/](examples/) for sample usages.
@@ -69,7 +93,7 @@ $ ./bin/dev up codespeed
 
 $ sed -ie 's#/data/bitcoin_bench#/path/to/your/datadir#g' docker-compose.dev.yml
 
-$ ./bin/dev runbench bitcoinperf examples/smoketest.yml
+$ ./bin/dev runbench bitcoinperf run examples/smoketest.yml
 ```
 
 Navigate to http://localhost:8000/ to see results reported to codespeed.

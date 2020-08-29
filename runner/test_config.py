@@ -32,6 +32,7 @@ def test_parse_config(setup_files):
     c = config.Config(**yaml.load(TEST_CFG, Loader=yaml.Loader))
 
     assert [i[0] for i in c.benches] == [
+        'build',
         'unittests',
         'functests',
         'microbench',

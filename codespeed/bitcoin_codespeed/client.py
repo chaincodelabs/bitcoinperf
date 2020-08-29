@@ -76,7 +76,8 @@ if __name__ == "__main__":
     parser = OptionParser()
     parser.add_option("--benchmark")
     parser.add_option("--commitid")
-    parser.add_option("--environment",
+    parser.add_option(
+        "--environment",
         help="Use a custom Codespeed environment")
     parser.add_option("--executable")
     parser.add_option("--max", type="float")
@@ -87,7 +88,8 @@ if __name__ == "__main__":
     parser.add_option("--result-value", type="float")
     parser.add_option("--revision_date")
     parser.add_option("--std-dev", type="float")
-    parser.add_option("--url",
+    parser.add_option(
+        "--url",
         help="URL of your Codespeed server (e.g. http://codespeed.example.org)")
 
     (options, args) = parser.parse_args()
@@ -117,6 +119,6 @@ if __name__ == "__main__":
     try:
         save_to_speedcenter(**kwargs)
         sys.exit(0)
-    except StandardError as e:
+    except Exception as e:
         logging.error("Error saving results: %s", e)
         sys.exit(1)

@@ -3,6 +3,8 @@
 #
 # Shortcuts for local development.
 
+set -e
+
 CMD="$1"; shift;
 
 base_cmd() {
@@ -24,7 +26,11 @@ elif [[ "$CMD" == "runc" ]]; then
 
 elif [[ "$CMD" == "runbench" ]]; then
   base_cmd run --rm bench "$@"
-
+ 
+elif [[ "$CMD" == "lint" ]]; then
+  base_cmd run --rm bench mypy runner/
+  base_cmd run --rm bench flake8 runner/
+ 
 elif [[ "$CMD" == "deps" ]]; then
   base_cmd run --rm codespeed pipenv lock
   base_cmd stop codespeed

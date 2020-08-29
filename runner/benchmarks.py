@@ -1,14 +1,12 @@
 import abc
 import copy
-import os
 import time
 import datetime
 import shutil
-import glob
 import typing as t
 from pathlib import Path
 
-from . import bitcoind, results, sh, config, git, hwinfo, logparse
+from . import bitcoind, results, sh, config, hwinfo, logparse
 from .globals import G
 from .logging import get_logger
 from .sh import popen
@@ -31,16 +29,18 @@ class Benchmark(abc.ABC):
     def __init__(self,
                  cfg: config.Config,
                  bench_cfg: config.Bench,
+                 compiler: config.Compilers,
                  target: config.Target,
                  run_idx: int = 0):
         self.cfg = cfg
         self.run_idx = run_idx
         self.bench_cfg = bench_cfg
-        self.compiler = copy.copy(G.compiler)
-        self.gitco = copy.copy(G.gitco)
+        self.compiler = compiler
+        assert target.gitco
+        self.gitco: config.GitCheckout = copy.copy(target.gitco)
         self.target = target
         self.id: str = self.id_format.format(
-            cfg=cfg, G=G, bench_cfg=self.bench_cfg)
+            self=self, cfg=cfg, G=G, bench_cfg=self.bench_cfg)
 
         # Each subclass must define a Results class, which defines the schema
         # of result data that the bench run will yield.
@@ -73,7 +73,24 @@ class Benchmark(abc.ABC):
         """Any teardown that should always happen after the benchmark."""
         pass
 
-    def wrapped_run(self, cfg, bench_cfg):
+    @property
+    def artifacts_dir(self) -> Path:
+        """A place to stash various artifacts from the benchmark."""
+        assert self.cfg.workdir
+
+        if not getattr(self, '_artifacts_dir', None):
+            prefix = f'artifacts-{self.id}-{self.gitco.ref}'
+            idx = len(list(self.cfg.workdir.glob(prefix + '*')))
+
+            if idx != self.run_idx:
+                logger.warning("Unexpected drift in run index from artifacts index")
+
+            path = self.cfg.workdir / (prefix + f'.{idx}')
+            path.mkdir()
+            self._artifacts_dir = path
+        return self._artifacts_dir
+
+    def run(self, cfg, bench_cfg) -> None:
         """Called externally."""
         sh.drop_caches()
 
@@ -94,8 +111,7 @@ class Benchmark(abc.ABC):
 
         logger.info("[%s] done", self.id or self.name)
 
-    def _try_execute_and_report(
-            self, cmd_str, *, num_tries=1, executable='bitcoind'):
+    def _try_execute_and_report(self, cmd_str, *, num_tries=1):
         """
         Attempt to execute some command a number of times and then report
         its execution memory usage or execution time to codespeed over HTTP.
@@ -104,180 +120,131 @@ class Benchmark(abc.ABC):
             cmd = sh.Command(cmd_str, self.name)
             cmd.start()
             cmd.join()
-
+            self._report_results(cmd)
             if not cmd.check_for_failure():
-                # Command succeeded
-                _log_bench_result(True, self.id, cmd)
-                self.results.total_time = cmd.total_secs
-                self.results.peak_rss_kb = cmd.memusage_kib()
-                results.report_result(self, self.id, cmd.total_secs)
-                results.report_result(
-                    self, self.id + '.mem-usage', cmd.memusage_kib())
                 return True
 
-        _log_bench_result(False, self.id, cmd)
         return False
+
+    def _report_results(self, cmd: sh.Command):
+        if cmd.check_for_failure():
+            self._log_result(False, self.id, cmd)
+        else:
+            self._log_result(True, self.id, cmd)
+            self.results.command = cmd.cmd
+            self.results.total_time_secs = int(cmd.total_secs)
+            self.results.peak_rss_kb = cmd.memusage_kib()
+            assert self.cfg.workdir
+            self.results.configure_info = hwinfo.parse_configure_log(
+                self.cfg.workdir / 'bitcoin')
+
+            results.report_result(self, self.id, cmd.total_secs)
+            results.report_result(
+                self, self.id + '.mem-usage', cmd.memusage_kib())
+
+    def _log_result(self,
+                    succeeded: bool,
+                    bench_name: str,
+                    cmd: sh.Command):
+        if not succeeded:
+            assert cmd.stdout is not None
+            assert cmd.stderr is not None
+
+            logger.error(
+                "[%s] command failed with code %d\nstdout:\n%s\nstderr:\n%s",
+                bench_name,
+                cmd.returncode,
+                cmd.stdout.decode()[-10000:],
+                cmd.stderr.decode()[-10000:])
+        else:
+            logger.info(
+                "[%s] command finished successfully in %.3f seconds (%s) "
+                "with maximum resident set size %.3f MiB",
+                bench_name, cmd.total_secs,
+                datetime.timedelta(seconds=cmd.total_secs),
+                cmd.memusage_kib() / 1024)
 
 
 class Build(Benchmark):
     name = 'build'
-    id_format = 'build.make.{bench_cfg.num_jobs}.{G.compiler}'
+    id_format = 'build.make.{bench_cfg.num_jobs}.{self.compiler}'
 
     def _run(self, cfg, bench_cfg):
-        # Important that we set this envvar before potentially early-exiting
-        # from cache.
-        os.environ['BDB_PREFIX'] = "%s/bitcoin/db4" % cfg.workdir
+        sh.cd(cfg.workdir)
+        num_jobs = bench_cfg.num_jobs
+        builder = bitcoind.BuildManager(
+            cfg.workdir,
+            cfg.build_cache_path(),
+            clean=cfg.clean,
+        )
+        self.results.title = f'Build with {self.compiler} (j={num_jobs})'
+        cmd = builder.build(
+            self.target, self.compiler, num_jobs=bench_cfg.num_jobs)
+        if cmd:  # i.e. if not cached
+            self._report_results(cmd)
 
-        self._clean_out_cache()
-        if self._restore_from_cache():
-            return
-
-        logger.info("Building db4")
-        sh.run("./contrib/install_db4.sh .")
-        sh.run("./autogen.sh")
-
-        configure_prefix = ''
-        if G.compiler == 'clang':
-            configure_prefix = 'CC=clang CXX=clang++ '
-
-        # Ensure build is clean.
-        makefile_path = cfg.workdir / 'bitcoin' / 'Makefile'
-        if makefile_path.is_file() and cfg.clean:
-            sh.run('make distclean')
-
-        boostflags = ''
-        armlib_path = '/usr/lib/arm-linux-gnueabihf/'
-
-        if Path(armlib_path).is_dir():
-            # On some architectures we need to manually specify this,
-            # otherwise configuring with clang can fail.
-            boostflags = '--with-boost-libdir=%s' % armlib_path
-
-        logger.info("Running ./configure ...")
-        sh.run(
-            configure_prefix +
-            './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-            'BDB_CFLAGS="-I${BDB_PREFIX}/include" '
-            + ' {} '.format(bench_cfg.configure_args) +
-            # Ensure ccache is disabled so that subsequent make runs
-            # are timed accurately.
-            '--disable-ccache ' + boostflags)
-
-        logger.info(f"Running make -j {bench_cfg.num_jobs}")
-        self.results.command = f"make -j {bench_cfg.num_jobs}"
-        self.results.title = f'Build with {G.compiler} (j={bench_cfg.num_jobs})'
-        self._try_execute_and_report(
-            "make -j %s" % bench_cfg.num_jobs, executable='make')
-
-        if cfg.cache_build:
-            cache = self._get_cache_path()
-            logger.info("Copying build to cache %s", cache)
-            shutil.copytree(cfg.workdir / 'bitcoin', cache)
-
-    def _get_cache_path(self):
-        return (
-            self.cfg.build_cache_path() /
-            "{}-{}".format(self.gitco.sha, self.compiler))
-
-    def _restore_from_cache(self) -> True:
-        cache = self._get_cache_path()
-        cache_bitcoind = cache / 'src' / 'bitcoind'
-        cache_bitcoincli = cache / 'src' / 'bitcoin-cli'
-
-        if self.cfg.cache_build and cache.exists():
-            if not (cache_bitcoind.exists() and cache_bitcoincli.exists()):
-                logger.warning(
-                    "Incomplete cache found at %s; rebuilding", cache)
-                sh.rm(cache)
-                return False
-
-            logger.info(
-                "Cached version of build %s found - "
-                "restoring from that and skipping build ", self.gitco.sha)
-            os.chdir(self.cfg.workdir)
-            if (self.cfg.workdir / 'bitcoin').exists():
-                sh.rm(self.cfg.workdir / 'bitcoin')
-            os.symlink(cache, self.cfg.workdir / 'bitcoin')
-            os.chdir(self.cfg.workdir / 'bitcoin')
-
-            msg = git.get_commit_msg('HEAD')
-            if msg != self.gitco.commit_msg:
-                raise RuntimeError(
-                    "cache {} has bad HEAD (expected '{}', got '{}')!".format(
-                        cache, self.gitco.commit_msg, msg))
-
-            return True
-        return False
-
-    def _clean_out_cache(self):
-        cache = self.cfg.build_cache_path()
-        files_in_cache = glob.glob("{}/*".format(cache))
-        files_in_cache.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-
-        for stale in files_in_cache[self.cfg.cache_build_size:]:
-            logger.info("Deleting stale cache %s", stale)
-            sh.rm(Path(stale))
+        shutil.copyfile(
+            builder.repo_path / 'config.log', self.artifacts_dir / 'config.log')
+        logger.info('Configure log saved in %s', self.artifacts_dir / 'config.log')
 
 
 class MakeCheck(Benchmark):
     name = 'makecheck'
-    id_format = 'makecheck.{G.compiler}.j={bench_cfg.num_jobs}'
+    id_format = 'makecheck.{self.compiler}.j={bench_cfg.num_jobs}'
 
     def _run(self, cfg, bench_cfg):
         cmd = f"make -j {bench_cfg.num_jobs} check"
-        self.results.command = cmd
         self.results.title = f'Make check (j={bench_cfg.num_jobs})'
-        self.results.configure_info = hwinfo.parse_configure_log(
-            self.cfg.workdir / 'bitcoin')
-        self._try_execute_and_report(cmd, num_tries=3, executable='make')
+        self._try_execute_and_report(cmd, num_tries=3)
 
 
 class FunctionalTests(Benchmark):
     name = 'functests'
-    id_format = 'functionaltests.{G.compiler}.j={bench_cfg.num_jobs}'
+    id_format = 'functionaltests.{self.compiler}.j={bench_cfg.num_jobs}'
 
     def _run(self, cfg, bench_cfg):
         cmd = "./test/functional/test_runner.py"
-        self.results.command = cmd
         self.results.title = 'Functional tests'
-        self.results.configure_info = hwinfo.parse_configure_log(
-            self.cfg.workdir / 'bitcoin')
-        self._try_execute_and_report(
-            cmd, num_tries=3, executable='functional-test-runner')
+        self._try_execute_and_report(cmd, num_tries=3)
 
 
 class Microbench(Benchmark):
     name = 'microbench'
-    id_format = 'micro.{G.compiler}'
+    id_format = 'micro.{self.compiler}'
     _results_class = results.MicrobenchResults
 
     def _run(self, cfg, bench_cfg):
         time_start = time.time()
         sh.drop_caches()
         cmd_str = "./src/bench/bench_bitcoin"
-        self.results.configure_info = hwinfo.parse_configure_log(
-            self.cfg.workdir / 'bitcoin')
 
         if bench_cfg.filter:
             cmd_str += " -filter='{}'".format(bench_cfg.filter)
 
+        outpath = self.artifacts_dir / f'{self.id}_results'
         # TODO: use sh.Command, report peak memory usage - maybe per bench?
-        cmd_str += " -output_csv=/tmp/microbench > /dev/null && cat /tmp/microbench"
+        cmd_str += f" -output_csv={outpath} > /dev/null && cat {outpath}"
 
         microbench_ps = popen(cmd_str)
         (microbench_stdout,
          microbench_stderr) = microbench_ps.communicate()
         self.results.command = cmd_str
         self.results.title = 'Microbench'
-        self.results.total_time = (time.time() - time_start)
+        self.results.total_time_secs = (time.time() - time_start)
+
+        # Don't use _try_execute_and_report because we need to report each
+        # microbenchmark individually.
 
         if microbench_ps.returncode != 0:
             text = "stdout:\n%s\nstderr:\n%s" % (
                 microbench_stdout.decode(), microbench_stderr.decode())
 
-            G.slack.send_to_slack_attachment(
-                G.gitco, "Microbench exited with code %s" %
-                microbench_ps.returncode, {}, text=text, success=False)
+            msg = "Microbench exited with code %s" % microbench_ps.returncode
+            if G.slack:
+                G.slack.send_to_slack_attachment(
+                    self.gitco, msg, {}, text=text, success=False)
+            else:
+                logger.warning(f"{msg} on {self.gitco}:\n{text}")
 
         microbench_lines = [
             # Skip the first line (header)
@@ -298,7 +265,7 @@ class Microbench(Benchmark):
             self.results.bench_to_time[bench] = median
             results.report_result(
                 self,
-                'micro.{G.compiler}.{bench}'.format(G=G, bench=bench),
+                'micro.{compiler}.{bench}'.format(compiler=self.compiler, bench=bench),
                 median,
                 extra_data={'result_max': max_, 'result_min': min_},
             )
@@ -319,9 +286,18 @@ class _IbdBench(Benchmark):
         self.id = self._get_codespeed_bench_name(
             self.bench_cfg.end_height or 'tip')
 
-    def _get_server_node(self) -> bitcoind.Node:
+    def _get_server_node(self) -> t.Optional[bitcoind.Node]:
         # This might return None if we're IBDing from network.
-        self.server_node = bitcoind.get_synced_node(self.cfg)
+        peer = self.cfg.synced_peer
+
+        if not peer:
+            logger.info('running benchmark without synced peer')
+            return None
+        elif peer.address:
+            logger.info(f'using networked synced peer at {peer.address}')
+            return None
+
+        self.server_node = bitcoind.get_synced_node(peer)
         return self.server_node
 
     def _get_dbcache(self) -> str:
@@ -335,6 +311,8 @@ class _IbdBench(Benchmark):
         pass
 
     def _get_codespeed_bench_name(self, current_height) -> str:
+        assert isinstance(self.bench_cfg, config.IBDishBench)
+
         if self.bench_cfg.start_height:
             fmt = "{self.name}.{start_height}.{current_height}"
         else:
@@ -353,9 +331,6 @@ class _IbdBench(Benchmark):
         last_height_seen = starting_height
         last_resource_usage = None
         start_time = None
-
-        self.results.configure_info = hwinfo.parse_configure_log(
-            self.cfg.workdir / 'bitcoin')
 
         self.results.command: str = self.client_node.cmd.cmd
         self.results.title: str = self._get_title()
@@ -491,13 +466,12 @@ class _IbdBench(Benchmark):
 
         # Don't finalize results if the IBD was a failure.
         #
-        if _check_for_ibd_failure(client_node):
+        if client_node.ps.returncode != 0 or client_node.check_disk_low():
             logger.info("IBD failed")
-            _log_bench_result(
-                False, final_name, self.client_node.cmd)
+            self._log_result(False, final_name, self.client_node.cmd)
             return False
 
-        _log_bench_result(True, final_name, self.client_node.cmd)
+        self._log_result(True, final_name, self.client_node.cmd)
 
         # Mark measurements for all heights remaining.
         #
@@ -514,8 +488,8 @@ class _IbdBench(Benchmark):
             )
             results.report_result(
                 self,
-                self._get_codespeed_bench_name(report_at_height)
-                + '.mem-usage',
+                self._get_codespeed_bench_name(report_at_height) +
+                '.mem-usage',
                 client_node.cmd.memusage_kib(),
                 extra_data={'height': last_height_seen, **extra_data},
             )
@@ -536,7 +510,7 @@ class _IbdBench(Benchmark):
                 extra_data={'height': last_height_seen, **extra_data},
             )
 
-        self.results.total_time = final_time
+        self.results.total_time_secs = final_time
         self.results.peak_rss_kb = self.client_node.cmd.memusage_kib()
 
         if last_resource_usage:
@@ -555,11 +529,14 @@ class _IbdBench(Benchmark):
         for i in cmd.split():
             if i.startswith('-datadir='):
                 return Path(i.split('=', 1)[-1])
+        raise RuntimeError(f'no datadir extractable from {cmd}')
 
     def _teardown(self):
         """
         Shut down all the nodes we started and stash the datadir if need be.
         """
+        if not self.client_node:
+            return
         if self.client_node.is_process_alive:
             # Longer timeout - might be flushing cache
             self.client_node.stop_via_rpc(timeout=(60 * 25))
@@ -567,12 +544,13 @@ class _IbdBench(Benchmark):
             self.server_node.stop_via_rpc(timeout=120)
 
         # Copy logfile to results
-        debuglogpath = str(self._get_datadir_path() / 'debug.log')
-        debuglogname = 'debug.{}-{}.log'.format(self.target.name, self.run_idx)
-        shutil.copyfile(debuglogpath, str(self.cfg.results_dir / debuglogname))
+        debuglogpath = self._get_datadir_path() / 'debug.log'
+        if debuglogpath.exists():
+            shutil.copyfile(
+                debuglogpath, str(self.artifacts_dir / 'debug.log'))
 
-        with open(debuglogpath, 'r') as f:
-            self.results.flush_events = logparse.get_flush_times(f)
+            with open(debuglogpath, 'r') as f:
+                self.results.flush_events = logparse.get_flush_times(f)
 
         if getattr(self.bench_cfg, 'stash_datadir', None):
             src_datadir = getattr(self.bench_cfg, 'src_datadir', None)
@@ -600,7 +578,7 @@ class IbdLocal(_IbdBench):
 
     def _get_client_node(self):
         self.client_node = bitcoind.Node(
-            self.cfg.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            self.cfg.workdir / 'bitcoin',
             self.cfg.workdir / 'data',
             extra_args=self.target.bitcoind_extra_args,
         )
@@ -626,7 +604,7 @@ class IbdRangeLocal(_IbdBench):
 
     def _get_client_node(self):
         self.client_node = bitcoind.Node(
-            self.cfg.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            self.cfg.workdir / 'bitcoin',
             self.cfg.workdir / 'data',
             copy_from_datadir=self.bench_cfg.src_datadir,
             extra_args=self.target.bitcoind_extra_args,
@@ -661,7 +639,7 @@ class IbdReal(_IbdBench):
 
     def _get_client_node(self):
         self.client_node = bitcoind.Node(
-            self.cfg.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            self.cfg.workdir / 'bitcoin',
             self.cfg.workdir / 'data',
             extra_args=self.target.bitcoind_extra_args,
         )
@@ -683,7 +661,7 @@ class Reindex(_IbdBench):
 
     def _get_client_node(self):
         self.client_node = bitcoind.Node(
-            self.cfg.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            self.cfg.workdir / 'bitcoin',
             self.bench_cfg.src_datadir,
             extra_args=self.target.bitcoind_extra_args,
         )
@@ -704,7 +682,7 @@ class ReindexChainstate(_IbdBench):
 
     def _get_client_node(self):
         self.client_node = bitcoind.Node(
-            self.cfg.workdir / 'bitcoin' / 'src' / 'bitcoind',
+            self.cfg.workdir / 'bitcoin',
             self.bench_cfg.src_datadir,
             extra_args=self.target.bitcoind_extra_args,
         )
@@ -715,24 +693,3 @@ class ReindexChainstate(_IbdBench):
     def _get_title(self):
         return 'Reindex-chainstate to height {} (dbcache={})'.format(
             self.bench_cfg.end_height, self._get_dbcache())
-
-
-def _log_bench_result(succeeded: bool, bench_name: str, cmd: sh.Command):
-    if not succeeded:
-        logger.error(
-            "[%s] command failed with code %d\nstdout:\n%s\nstderr:\n%s",
-            bench_name,
-            cmd.returncode,
-            cmd.stdout.decode()[-10000:],
-            cmd.stderr.decode()[-10000:])
-    else:
-        logger.info(
-            "[%s] command finished successfully in %.3f seconds (%s) "
-            "with maximum resident set size %.3f MiB",
-            bench_name, cmd.total_secs,
-            datetime.timedelta(seconds=cmd.total_secs),
-            cmd.memusage_kib() / 1024)
-
-
-def _check_for_ibd_failure(node):
-    return node.ps.returncode != 0 or node.check_disk_low()

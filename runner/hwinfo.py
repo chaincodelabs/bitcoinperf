@@ -12,6 +12,7 @@ import socket
 import distro
 import re
 import sys
+import typing as t
 from pathlib import Path
 
 from .util import md_table
@@ -43,7 +44,8 @@ def get_disk_iops(locations=None):
         cmd = (
             "fio --randrepeat=1 --ioengine=libaio --direct=1 --gtod_reduce=1 "
             f"--name=test --filename={filename} --bs=4k "
-            "--iodepth=64 --size=180M --time_based=1 --runtime=20 --readwrite=randrw --rwmixread=75")
+            "--iodepth=64 --size=180M --time_based=1 --runtime=20 "
+            "--readwrite=randrw --rwmixread=75")
 
         res = subprocess.run(cmd.split(), capture_output=True)
 
@@ -78,7 +80,7 @@ def get_processor_name():
     return ""
 
 
-def get_hwinfo(datadir_path: str, srcdir_path: str):
+def get_hwinfo(datadir_path: Path, srcdir_path: t.Optional[str]):
     paths_for_io = [Path(datadir_path or os.getcwd())]
     out_dict = dict(
         hostname=socket.gethostname(),
@@ -97,7 +99,7 @@ def get_hwinfo(datadir_path: str, srcdir_path: str):
     return out_dict
 
 
-def parse_configure_log(src_dir_path: str) -> dict:
+def parse_configure_log(src_dir_path: t.Union[str, Path]) -> dict:
     """
     Inspect the config.log file from the bitcoin src dir.
     """

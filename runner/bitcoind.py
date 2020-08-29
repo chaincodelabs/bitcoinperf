@@ -2,11 +2,12 @@ import json
 import time
 import typing as t
 import socket
-import subprocess
 import shutil
+import os
+import glob
 from pathlib import Path
 
-from . import sh, logging
+from . import sh, logging, config, git
 
 logger = logging.get_logger()
 
@@ -38,10 +39,10 @@ class Node:
     """
     # Keep a class-level listing of all created nodes so that we can
     # ensure shutdown.
-    all_instances = []
+    all_instances: t.List['Node'] = []
 
     def __init__(self,
-                 bitcoind_bin_path,
+                 repo_path,
                  datadir,
                  copy_from_datadir: Path = None,
                  port: int = None,
@@ -56,21 +57,31 @@ class Node:
             If port and rpcport are left unspecified, unused ports will be
                 found and used automatically.
         """
-        self.bitcoind_bin_path = bitcoind_bin_path
-        self.bitcoincli_bin_path = bitcoind_bin_path.parent / 'bitcoin-cli'
+        self.repo_path = repo_path
+        self.bitcoincli_bin_path = repo_path / 'src' / 'bitcoin-cli'
         self.datadir = datadir
         self.port = port or _find_unused_port()
         self.rpcport = rpcport or _find_unused_port(self.port + 1)
         self.extra_args = extra_args or ''
 
-        self.datadir.mkdir(exist_ok=True)
         if copy_from_datadir:
-            shutil.rmtree(self.datadir)
+            if self.datadir.exists():
+                sh.rm(self.datadir)
+            logger.info(
+                f'Seeding datadir from {copy_from_datadir} -> {self.datadir}')
             shutil.copytree(copy_from_datadir, self.datadir)
+        else:
+            self.datadir.mkdir(exist_ok=True)
 
-        self.cmd: sh.Command = None
+            # Make sure to clear out any old debug.log we've inherited from the
+            # source datadir so that our log start time isn't screwed up
+            # (see logparse.get_log_start()).
+            if (self.datadir / 'debug.log').exists():
+                os.unlink(str(self.datadir / 'debug.log'))
+
+        self.cmd: t.Optional[sh.Command] = None
         # Arguments this node has been started with.
-        self.started_args = []
+        self.started_args: t.List[dict] = []
 
         Node.all_instances.append(self)
 
@@ -80,6 +91,9 @@ class Node:
             self.ps.pid if self.ps else None)
 
     __str__ = __repr__
+
+    def checkout_and_build(self, target: config.Target):
+        pass
 
     @property
     def is_process_alive(self):
@@ -121,18 +135,20 @@ class Node:
             _BENCH_SPECIFIC_BITCOIND_ARGS, self.port, self.rpcport)
 
         run_cmd = '{} -datadir={} {} {}'.format(
-            self.bitcoind_bin_path, self.datadir, self.extra_args, cmd)
+            self.repo_path / 'src' / 'bitcoind',
+            self.datadir, self.extra_args, cmd)
 
         self.start_time = time.time()
-        self.cmd = sh.Command(run_cmd, 'run node'.format(self))
+        self.cmd = sh.Command(run_cmd, 'run node {}'.format(self))
         self.cmd.start()
         logger.debug("command '%s' starting for %s", run_cmd, self)
 
-    def get_args_dict(self) -> dict:
+    def get_args_dict(self) -> t.Dict[str, str]:
         """
         Return the performance-relevant arguments this instance was started
         with.
         """
+        assert self.cmd
         args = self.cmd.cmd.split('bitcoind')[-1].split()
         args = [a.lstrip('-') for a in args]
         d = {}
@@ -146,19 +162,20 @@ class Node:
                 k, v = a.split('=')
                 d[k] = v
             else:
-                d[a] = 1
+                d[a] = '1'
 
         return d
 
-    def wait_for_init(self, require_height=None) -> int:
+    def wait_for_init(self, require_height=None) -> t.Optional[int]:
         """
         Wait for the node to initialize, return the starting height.
 
         If require_height is given, ensure that the node starts having a chain
         at least `require_height` high.
 
-        Returns block count.
+        Returns block count, if node successfully started.
         """
+        assert self.cmd
         num_tries = 600
         sleep_time_secs = 1
         bitcoind_up = False
@@ -208,7 +225,7 @@ class Node:
         call = sh.run(
             "{} -rpcport={} -datadir={} {}".format(
                 self.bitcoincli_bin_path, self.rpcport, self.datadir, cmd),
-            check_returncode=False)
+            check=False)
 
         # Ignore these lest we spam the logs.
         insignificant_errors = [
@@ -217,19 +234,18 @@ class Node:
             "Verifying blocks...",
         ]
 
-        if call[2] != 0:
-            if not any(i in call[1].decode() for i in insignificant_errors):
+        if call.returncode != 0:
+            if not any(i in call.stderr for i in insignificant_errors):
                 logger.debug("non-zero returncode from RPC call (%s): %s",
                              self, call)
             return None
 
         if not deserialize_output:
-            logger.debug("rpc: %r -> %r", cmd, call[0])
+            logger.debug("rpc: %r -> %r", cmd, call.stdout)
         else:
-            logger.debug("response for %r:\n%s",
-                         cmd, json.loads(call[0].decode()))
+            logger.debug("response for %r:\n%s", cmd, json.loads(call.stdout))
 
-        return json.loads(call[0].decode()) if deserialize_output else None
+        return json.loads(call.stdout) if deserialize_output else None
 
     def stop_via_rpc(self, timeout=None):
         logger.info("Calling stop on %s", self)
@@ -242,23 +258,17 @@ class Node:
 
     def empty_datadir(self):
         """Ensure empty data before each IBD."""
-        sh.run("rm -rf %s" % self.datadir, check_returncode=False)
+        sh.run("rm -rf %s" % self.datadir, check=False)
         if not self.datadir.exists():
             self.datadir.mkdir()
 
     def check_disk_low(self):
-        disk_warning_ps = subprocess.run(
+        disk_warning_ps = sh.run(
             ("tail -n 10000 {}/debug.log | "
-             "grep 'Disk space is low!' ").format(self.datadir),
-            shell=True)
+             "grep 'Disk space is low!' ").format(self.datadir))
 
         # True if we're low on disk
         return disk_warning_ps.returncode == 0
-
-    def check_for_failure(self):
-        if self.check_disk_low():
-            return True
-        return False
 
     def join(self, timeout=None):
         return self.cmd.join(timeout=timeout)
@@ -292,6 +302,7 @@ class Node:
         return (int(last_height_seen), float(info['verificationprogress']))
 
     def get_resource_usage(self) -> sh.ResourceUsage:
+        assert self.cmd
         return self.cmd.get_resource_usage()
 
 
@@ -314,25 +325,244 @@ def _find_unused_port(startval=8888) -> int:
     return portnum
 
 
-def get_synced_node(cfg, required_height: int = None) -> t.Optional[Node]:
+# Synced peers should only be built once per process, since their git ref
+# will never change within a bitcoinperf process. Cache them here.
+_built_peer_cache: t.Dict[config.SyncedPeer, bool] = {}
+
+
+def get_synced_node(peer_config: config.SyncedPeer,
+                    required_height: int = None) -> t.Optional[Node]:
     """
     Spawns a bitcoind instance that has a synced chain high enough to service
     an IBD up to the last checkpoint (`--ibd-checkpoints`).
 
     Must be cleaned up by the caller.
     """
-    if cfg.synced_peer.address:
+    curr_path = Path.cwd()
+
+    if peer_config.address:
         # If we're not running a node locally, don't worry about setup and
         # teardown.
         return None
 
+    if peer_config.gitref and not _built_peer_cache.get(peer_config):
+        logger.info(f'Starting build for synced peer ({peer_config})')
+        target = config.Target(gitref=peer_config.gitref, rebase=False)
+        assert peer_config.repodir
+        [co], _ = git.resolve_targets(peer_config.repodir, [target])
+        git.checkout_in_dir(peer_config.repodir, target)
+        builder = BuildManager(peer_config.repodir.parent, clean=False)
+        builder.build(target, config.Compilers.gcc)
+        logger.info(f'Finished build for synced peer ({peer_config})')
+
+        _built_peer_cache[peer_config] = True
+
     server = Node(
-        cfg.synced_peer.repodir / 'src' / 'bitcoind',
-        cfg.synced_peer.datadir,
-        extra_args=cfg.synced_peer.bitcoind_extra_args,
+        peer_config.repodir,
+        peer_config.datadir,
+        extra_args=peer_config.bitcoind_extra_args,
     )
     server.start(connect=0, listen=1)
     server.wait_for_init(require_height=required_height)
     logger.info("synced node is active (pid %s)", server.ps.pid)
 
+    # Clean up any path changes.
+    sh.cd(curr_path)
     return server
+
+
+class BuildManager:
+
+    def __init__(self,
+                 workdir: Path,
+                 cache_path: Path = None,
+                 clean: bool = True):
+        """
+        Args:
+            cache_path: if given, cache builds at this location.
+            clean: should run `make distclean`?
+        """
+        self.workdir = workdir
+        self.cache_path = cache_path
+        self.clean = clean
+        self.repo_path = self.workdir / 'bitcoin'
+
+    def build(self,
+              target: config.Target,
+              compiler: config.Compilers,
+              *,
+              num_jobs: t.Optional[int] = None) -> t.Optional[sh.Command]:
+        """
+        Checks out the bitcoin repo to the desired target and builds
+        bitcoind.
+
+        Returns: a completed Command if we did a build, None if we used cache.
+        """
+        logger.info(f"Starting build for {target.cache_key}")
+        makefile = self.repo_path / 'Makefile'
+        sh.cd(self.repo_path)
+
+        if makefile.exists():
+            logger.info('Running make clean')
+            sh.run('make clean')
+
+        git.checkout_in_dir(self.repo_path, target)
+
+        # Sanity check - compare the commit message as an extra assurance.
+        msg = git.get_commit_msg('HEAD')
+        assert target.gitco
+        if msg != target.gitco.commit_msg:
+            raise RuntimeError(
+                "checkout {} has bad HEAD (expected '{}', got '{}')!".format(
+                    self.repo_path, target.gitco.commit_msg, msg))
+
+        num_jobs = num_jobs or config.DEFAULT_NPROC
+        # Important that we set this envvar before potentially early-exiting
+        # from cache.
+        os.environ['BDB_PREFIX'] = "%s/bitcoin/db4" % self.workdir
+
+        cache = BuildCache(self.workdir, self.cache_path)
+        if self.cache_path and cache.restore(target):
+            return None
+
+        if not (self.repo_path / 'db4').exists():
+            logger.info("Retrieving db4")
+            assert sh.run("./contrib/install_db4.sh .").ok
+
+        if not (self.repo_path / 'configure').exists():
+            logger.info("Running autogen.sh")
+            assert sh.run("./autogen.sh").ok
+
+        configure_prefix = ''
+        if compiler == config.Compilers.clang:
+            configure_prefix = 'CC=clang CXX=clang++ '
+
+        # Ensure build is clean.
+        makefile_path = self.repo_path / 'Makefile'
+        if makefile_path.is_file() and self.clean:
+            sh.run('make distclean')
+
+        boostflags = ''
+        armlib_path = '/usr/lib/arm-linux-gnueabihf/'
+
+        if Path(armlib_path).is_dir():
+            # On some architectures we need to manually specify this,
+            # otherwise configuring with clang can fail.
+            boostflags = '--with-boost-libdir=%s' % armlib_path
+
+        logger.info("Running ./configure ...")
+        conf = sh.run(
+            configure_prefix +
+            './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
+            'BDB_CFLAGS="-I${BDB_PREFIX}/include" ' +
+            ' {} '.format(target.configure_args) +
+            # Ensure ccache is disabled so that subsequent make runs
+            # are timed accurately.
+            '--disable-ccache ' + boostflags)
+
+        if not conf.ok:
+            logger.error(conf.failure_msg(f"configure failed for {target}"))
+            raise RuntimeError('configure failed')
+
+        logger.info(f"Running make -j {num_jobs}")
+        cmd = sh.Command(f"make -j {num_jobs}")
+        cmd.start()
+        cmd.join()
+
+        _assert_version(self.repo_path, target.gitco.sha)
+
+        if cmd.returncode == 0 and self.cache_path:
+            cache.save(target)
+            cache.clean()
+        elif self.cache_path:
+            logger.warning(
+                "Unable to save build %s to cache-path %s", target, self.cache_path)
+
+        # cmd error will be handled by caller
+        return cmd
+
+
+class BuildCache:
+    """
+    Utility for caching built bitcoin binaries. This allows us to switch back
+    and forth between benchmark targets without having to rebuild.
+    """
+    def __init__(self, workdir: Path, cachedir: Path = None):
+        self.workdir = workdir
+        self.repo_path = workdir / 'bitcoin'
+        self.cachedir = cachedir or (workdir / 'build-cache')
+        self.cachedir.mkdir(exist_ok=True)
+
+    def _get_cache_path(self, target: config.Target):
+        return (self.cachedir / target.cache_key).resolve()
+
+    def save(self, target: config.Target):
+        cache = self._get_cache_path(target)
+        logger.info("Copying build to cache %s", cache)
+        btcdir = self.workdir / 'bitcoin'
+        srcdir = btcdir / 'src'
+        shutil.copy(srcdir / 'bitcoind', cache)
+        shutil.copy(srcdir / 'bitcoin-cli', cache)
+        shutil.copy(srcdir / 'bench' / 'bench_bitcoin', cache)
+
+    def restore(self, target: config.Target) -> bool:
+        """
+        Restore the build cache from a previous run.
+
+        DESTRUCTIVE: this will change pwd to the bitcoin dir.
+
+        Returns True if we restored the build from cache.
+        """
+        srcdir = self.repo_path / 'src'
+        assert target.gitco
+        cache = self._get_cache_path(target)
+        cache_bitcoind = cache / 'bitcoind'
+        cache_bitcoincli = cache / 'bitcoin-cli'
+        cache_bench = cache / 'bench_bitcoin'
+
+        if not cache.exists():
+            return False
+
+        if not all(c.exists() for c in (cache_bitcoind,
+                                        cache_bitcoincli,
+                                        cache_bench)):
+            logger.warning(
+                "Incomplete cache found at %s; rebuilding", cache)
+            sh.rm(cache)
+            return False
+
+        logger.info(
+            "Cached version of build %s found - "
+            "restoring from that and skipping build ", target.cache_key)
+
+        os.symlink(cache_bitcoind, srcdir / 'bitcoind')
+        os.symlink(cache_bitcoincli, srcdir / 'bitcoin-cli')
+        os.symlink(cache_bench, srcdir / 'bench' / 'bench_bitcoin')
+
+        _assert_version(self.repo_path, target.gitco.sha)
+        return True
+
+    def clean(self):
+        files_in_cache = glob.glob("{}/*".format(self.cachedir))
+        files_in_cache.sort(key=os.path.getmtime, reverse=True)
+
+        # TODO parameterize
+        CACHE_SIZE = 3
+
+        # reverse=True above because we only want to delete if we're over
+        # the cache size.
+        for stale in files_in_cache[CACHE_SIZE:]:
+            logger.info("Deleting stale cache %s", stale)
+            sh.rm(Path(stale))
+
+
+def _assert_version(repodir: Path, sha: str):
+    """Ensure we've checked out a specific version of bitcoin."""
+    srcdir = repodir / 'src'
+    # Sanity check - compare version as reported by binary
+    for bin in (srcdir / 'bitcoind', srcdir / 'bitcoin-cli'):
+        version_line = sh.run(f'{bin} -version | head -n 1').stdout
+
+        if sha[:8] not in version_line:
+            msg = f'expected: {sha}\nsaw: {version_line}'
+            raise RuntimeError(f'bad checkout: {repodir}\n{msg}')
