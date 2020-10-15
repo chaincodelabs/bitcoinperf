@@ -563,6 +563,6 @@ def _assert_version(repodir: Path, sha: str):
     for bin in (srcdir / 'bitcoind', srcdir / 'bitcoin-cli'):
         version_line = sh.run(f'{bin} -version | head -n 1').stdout
 
-        if sha[:8] not in version_line:
+        if sha[:7] not in version_line:
             msg = f'expected: {sha}\nsaw: {version_line}'
             raise RuntimeError(f'bad checkout: {repodir}\n{msg}')
