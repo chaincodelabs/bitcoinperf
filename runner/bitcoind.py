@@ -472,8 +472,8 @@ class BuildManager:
         cmd.join()
 
         if copy_log_to:
-            (copy_log_to / 'make.stdout').write_text(cmd.stdout)
-            (copy_log_to / 'make.stderr').write_text(cmd.stderr)
+            (copy_log_to / 'make.stdout').write_bytes(cmd.stdout or b'')
+            (copy_log_to / 'make.stderr').write_bytes(cmd.stderr or b'')
             logger.info("Saved make output to %s", copy_log_to)
 
         _assert_version(self.repo_path, target.gitco)
