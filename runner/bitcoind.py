@@ -391,7 +391,9 @@ class BuildManager:
               target: config.Target,
               compiler: config.Compilers,
               *,
-              num_jobs: t.Optional[int] = None) -> t.Optional[sh.Command]:
+              num_jobs: t.Optional[int] = None,
+              copy_log_to: t.Optional[Path] = None
+              ) -> t.Optional[sh.Command]:
         """
         Checks out the bitcoin repo to the desired target and builds
         bitcoind.
@@ -469,6 +471,11 @@ class BuildManager:
         cmd.start()
         cmd.join()
 
+        if copy_log_to:
+            (copy_log_to / 'make.stdout').write_text(cmd.stdout)
+            (copy_log_to / 'make.stderr').write_text(cmd.stderr)
+            logger.info("Saved make output to %s", copy_log_to)
+
         _assert_version(self.repo_path, target.gitco)
 
         if cmd.returncode == 0 and self.cache_path:
@@ -498,12 +505,13 @@ class BuildCache:
 
     def save(self, target: config.Target):
         cache = self._get_cache_path(target)
+        cache.mkdir(exist_ok=True, parents=True)
         logger.info("Copying build to cache %s", cache)
         btcdir = self.workdir / 'bitcoin'
         srcdir = btcdir / 'src'
-        shutil.copy(srcdir / 'bitcoind', cache)
-        shutil.copy(srcdir / 'bitcoin-cli', cache)
-        shutil.copy(srcdir / 'bench' / 'bench_bitcoin', cache)
+        shutil.copy(srcdir / 'bitcoind', cache / 'bitcoind')
+        shutil.copy(srcdir / 'bitcoin-cli', cache / 'bitcoin-cli')
+        shutil.copy(srcdir / 'bench' / 'bench_bitcoin', cache / 'bench_bitcoin')
 
     def restore(self, target: config.Target) -> bool:
         """

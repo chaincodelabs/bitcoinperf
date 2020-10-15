@@ -179,7 +179,10 @@ class Build(Benchmark):
         )
         self.results.title = f'Build with {self.compiler} (j={num_jobs})'
         cmd = builder.build(
-            self.target, self.compiler, num_jobs=bench_cfg.num_jobs)
+            self.target, self.compiler,
+            num_jobs=bench_cfg.num_jobs,
+            copy_log_to=self.artifacts_dir,
+        )
         if cmd:  # i.e. if not cached
             self._report_results(cmd)
 
