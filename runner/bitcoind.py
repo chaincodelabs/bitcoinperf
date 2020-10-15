@@ -469,7 +469,7 @@ class BuildManager:
         cmd.start()
         cmd.join()
 
-        _assert_version(self.repo_path, target.gitco.sha)
+        _assert_version(self.repo_path, target.gitco)
 
         if cmd.returncode == 0 and self.cache_path:
             cache.save(target)
@@ -539,7 +539,7 @@ class BuildCache:
         os.symlink(cache_bitcoincli, srcdir / 'bitcoin-cli')
         os.symlink(cache_bench, srcdir / 'bench' / 'bench_bitcoin')
 
-        _assert_version(self.repo_path, target.gitco.sha)
+        _assert_version(self.repo_path, target.gitco)
         return True
 
     def clean(self):
@@ -556,13 +556,16 @@ class BuildCache:
             sh.rm(Path(stale))
 
 
-def _assert_version(repodir: Path, sha: str):
+def _assert_version(repodir: Path, gitco: config.GitCheckout):
     """Ensure we've checked out a specific version of bitcoin."""
     srcdir = repodir / 'src'
     # Sanity check - compare version as reported by binary
     for bin in (srcdir / 'bitcoind', srcdir / 'bitcoin-cli'):
         version_line = sh.run(f'{bin} -version | head -n 1').stdout
+        sha = gitco.sha
+        ref = gitco.ref
+        version = version_line.split('version ')[-1]
 
-        if sha[:7] not in version_line:
-            msg = f'expected: {sha}\nsaw: {version_line}'
+        if sha[:7] not in version and ref not in version:
+            msg = f'expected: {sha} (or {ref}) \nsaw: {version_line}'
             raise RuntimeError(f'bad checkout: {repodir}\n{msg}')
