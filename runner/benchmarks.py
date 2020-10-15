@@ -86,7 +86,7 @@ class Benchmark(abc.ABC):
                 logger.warning("Unexpected drift in run index from artifacts index")
 
             path = self.cfg.workdir / (prefix + f'.{idx}')
-            path.mkdir()
+            path.mkdir(parents=True)
             self._artifacts_dir = path
         return self._artifacts_dir
 
