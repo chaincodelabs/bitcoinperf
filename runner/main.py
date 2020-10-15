@@ -421,6 +421,7 @@ def bench_pr(pr_num: str,
              num_blocks: int = 1_000,
              run_count: int = 2,
              run_micros: bool = False,
+             compare_ref: str = '',
              ):
     """
     Benchmark a PR relative to its merge base for some number of blocks,
@@ -433,6 +434,7 @@ def bench_pr(pr_num: str,
         num_blocks: the number of blocks to benchmark
         run_count: number of times to test IBD of each git ref
         run_micros: if true, run the microbenchmarks
+        compare_ref: compare the PR against this git ref instead of inferred mergebase
     """
     run_id = run_id or pr_num
     workdir = Path(f'/tmp/bitcoinperf-{run_id}')
@@ -448,10 +450,19 @@ def bench_pr(pr_num: str,
     targets = [
         config.Target(
             name=f"#{pr_num}", gitref=f'pr/{pr_num}', rebase=False),
-        config.Target(
-            name=git.MERGEBASE_REF, gitref='master', gitremote='origin',
-            rebase=False),
     ]
+
+    if compare_ref:
+        if '/' not in compare_ref:
+            compare_ref = f'origin/{compare_ref}'
+        remote, ref = compare_ref.split('/')
+
+        targets.append(config.Target(
+            name=ref, gitref=ref, gitremote=remote, rebase=False))
+    else:
+        targets.append(config.Target(
+            name=git.MERGEBASE_REF, gitref='master', gitremote='origin',
+            rebase=False))
 
     git.get_repo(repodir)
     checkouts, bad_targets = git.resolve_targets(repodir, targets)
@@ -472,6 +483,10 @@ def bench_pr(pr_num: str,
             repodir=config.peer_repo,
             gitref=peer_tag,
         ))
+
+    logger.info("Running benchmarks for:")
+    for target in targets:
+        logger.info("  %s", target.gitco)
 
     peer = config.SyncedPeer(**peer_args)
 
