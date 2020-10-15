@@ -513,6 +513,9 @@ class BuildCache:
         shutil.copy(srcdir / 'bitcoin-cli', cache / 'bitcoin-cli')
         shutil.copy(srcdir / 'bench' / 'bench_bitcoin', cache / 'bench_bitcoin')
 
+        # Cache config.log since we need it later for results reporting.
+        shutil.copy(btcdir / 'config.log', cache / 'config.log')
+
     def restore(self, target: config.Target) -> bool:
         """
         Restore the build cache from a previous run.
@@ -527,13 +530,16 @@ class BuildCache:
         cache_bitcoind = cache / 'bitcoind'
         cache_bitcoincli = cache / 'bitcoin-cli'
         cache_bench = cache / 'bench_bitcoin'
+        cache_config = cache / 'config.log'
 
         if not cache.exists():
             return False
 
         if not all(c.exists() for c in (cache_bitcoind,
                                         cache_bitcoincli,
-                                        cache_bench)):
+                                        cache_bench,
+                                        cache_config,
+                                        )):
             logger.warning(
                 "Incomplete cache found at %s; rebuilding", cache)
             sh.rm(cache)
@@ -546,6 +552,7 @@ class BuildCache:
         os.symlink(cache_bitcoind, srcdir / 'bitcoind')
         os.symlink(cache_bitcoincli, srcdir / 'bitcoin-cli')
         os.symlink(cache_bench, srcdir / 'bench' / 'bench_bitcoin')
+        shutil.copy(cache_config, self.repo_path / 'config.log')
 
         _assert_version(self.repo_path, target.gitco)
         return True
