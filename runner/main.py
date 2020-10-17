@@ -23,7 +23,7 @@ import clii
 
 from . import (
     output, config, bitcoind, results, slack, benchmarks, logging, git, sh,
-    hwinfo)
+    hwinfo, util)
 from .globals import G
 from .logging import get_logger
 
@@ -422,6 +422,7 @@ def bench_pr(pr_num: str,
              run_count: int = 2,
              run_micros: bool = False,
              compare_ref: str = '',
+             bitcoind_args: str = '',
              ):
     """
     Benchmark a PR relative to its merge base for some number of blocks,
@@ -435,6 +436,7 @@ def bench_pr(pr_num: str,
         run_count: number of times to test IBD of each git ref
         run_micros: if true, run the microbenchmarks
         compare_ref: compare the PR against this git ref instead of inferred mergebase
+        bitcoind_args: additional arguments to pass to bitcoind invocations
     """
     run_id = run_id or pr_num
     workdir = Path(f'/tmp/bitcoinperf-{run_id}')
@@ -449,7 +451,8 @@ def bench_pr(pr_num: str,
 
     targets = [
         config.Target(
-            name=f"#{pr_num}", gitref=f'pr/{pr_num}', rebase=False),
+            name=f"#{pr_num}", gitref=f'pr/{pr_num}', rebase=False,
+            bitcoind_extra_args=bitcoind_args),
     ]
 
     if compare_ref:
@@ -457,12 +460,15 @@ def bench_pr(pr_num: str,
             compare_ref = f'origin/{compare_ref}'
         remote, ref = compare_ref.split('/')
 
+        name = ref[:8] if util.is_hex(ref) else ref[:24]
         targets.append(config.Target(
-            name=ref, gitref=ref, gitremote=remote, rebase=False))
+            name=name, gitref=ref, gitremote=remote, rebase=False,
+            bitcoind_extra_args=bitcoind_args))
     else:
         targets.append(config.Target(
             name=git.MERGEBASE_REF, gitref='master', gitremote='origin',
-            rebase=False))
+            rebase=False,
+            bitcoind_extra_args=bitcoind_args))
 
     git.get_repo(repodir)
     checkouts, bad_targets = git.resolve_targets(repodir, targets)
@@ -470,6 +476,7 @@ def bench_pr(pr_num: str,
         print(f"failed to find commit for {[t.gitref for t in bad_targets]}")
         sys.exit(1)
 
+    # This is hardcoded per the preexisting datadir.
     start_height = 500_000
     end_height = start_height + num_blocks
 
