@@ -14,6 +14,8 @@ if ! grep bitcoinperf setup.py >/dev/null; then
   exit 1
 fi
 
+BITCOINPERF_RUN_YML=${BITCOINPERF_RUN_YML:-examples/prod.yml}
+
 git pull
 python3.8 -m pip install -q --user --upgrade -e .
 
@@ -21,6 +23,6 @@ while true; do
   sudo swapoff -a
   source runner/.env
   git pull
-  ~/.local/bin/bitcoinperf run examples/prod.yml
+  ~/.local/bin/bitcoinperf run $BITCOINPERF_RUN_YML
   sleep 60
 done
