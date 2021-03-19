@@ -24,6 +24,7 @@ python3.8 -m pip install -q --user --upgrade -e .
 
 tries=3
 
+# File that keeps environment-specific config and credentials
 PROD_ENV_FILE=./runner/.env
 
 # Which YAML file to run.
@@ -37,6 +38,7 @@ while [ $tries -gt 0 ]; do
     source $PROD_ENV_FILE
   else
     echo "warning: no production env file (${PROD_ENV_FILE}) to source"
+  fi
 
   if ! ~/.local/bin/bitcoinperf run ${YAML} ; then
     # On failure, back off and decrement tries
