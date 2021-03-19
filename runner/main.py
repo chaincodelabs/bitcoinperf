@@ -634,11 +634,9 @@ def _print_results(cfg: config.Config = None,
     if not cfg:
         cfg = list(list(grouped.values())[0].values())[0][0].cfg
 
-    if len(cfg.to_bench) <= 1:
-        timestr = output.get_times_table(grouped)
-        print(timestr)
-    else:
-        output.print_comparative_times_table(grouped, config=cfg)
+    output.print_comparative_times_table(grouped, config=cfg)
+
+    if len(cfg.to_bench) > 1:
         output.make_plots(cfg, grouped)
 
 

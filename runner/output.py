@@ -27,11 +27,13 @@ def format_val(bench_name, val):
         return str(datetime.timedelta(seconds=float(val)))
 
 
-def get_times_table(name_to_times_map):
+def get_times_table(grouped_runs):
     timestr = "\n"
-    for name, times in sorted(name_to_times_map.items()):
-        for time_ in times:
-            timestr += "{0}: {1}\n".format(name, format_val(name, time_))
+    for name, target_to_benches in sorted(grouped_runs.items()):
+        for target, benches in target_to_benches.items():
+            for bench in benches:
+                timestr += "[{}] {}: {}\n".format(
+                    target.id, name, format_val(name, bench.results.total_time_secs))
 
     return timestr
 
