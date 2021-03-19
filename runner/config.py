@@ -324,8 +324,10 @@ class Target(BaseModel):
 
     @property
     def _hash_str(self):
+        if not self.gitco:
+            raise ValueError("can't generate cache key until git checkout is resolved")
         return (
-            self.gitref + self.gitremote + self.bitcoind_extra_args +
+            self.gitco.sha + self.gitremote + self.bitcoind_extra_args +
             self.name + self.configure_args + str(self.rebase))
 
     def __hash__(self):
