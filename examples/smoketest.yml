@@ -1,12 +1,5 @@
 ---
 
-# Cache a built bitcoin src directory and restore it from the cache on
-# subsequent runs.
-cache_build: true
-
-# If true, the first git clone will be cached and copied from as necessary.
-cache_git: true
-
 # Set to false to make cache dropping optional and bypass various safety checks.
 safety_checks: false
 
@@ -24,6 +17,8 @@ synced_peer:
   
   # address: tanoshii.local:8333
 
+
+teardown: false
 
 codespeed:
   url: http://codespeed:8000

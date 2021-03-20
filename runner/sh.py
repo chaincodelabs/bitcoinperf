@@ -46,6 +46,7 @@ def cd(*args, **kwargs):
 
 
 def rm(path: Path):
+    """Polymorphic rm of file objects."""
     logger.debug(f"rm {path}")
     if path.is_symlink():
         path.unlink()

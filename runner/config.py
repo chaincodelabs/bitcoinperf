@@ -348,8 +348,6 @@ class Config(BaseModel):
     teardown: bool = True
     safety_checks: bool = True
     clean: bool = True
-    cache_build: bool = False
-    cache_git: bool = False
     cache_build_size: int = 3
     codespeed: Op[Codespeed] = None
     benches: Op[Benches] = None

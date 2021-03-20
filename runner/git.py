@@ -79,7 +79,9 @@ def checkout_in_dir(git_path: Path, target: config.Target) -> GitCheckout:
     """
     assert target.gitco, 'Target must be resolved before checking out.'
     co = target.gitco
-    if sh.run(f"git checkout {co.sha}").returncode != 0:
+    checkoutcmd = sh.run(f"git checkout {co.sha}")
+    if checkoutcmd.returncode != 0:
+        logger.warning(f"git checkout of {co.sha} failed: {checkoutcmd.output}")
         raise RuntimeError(f"sha {co.sha} was not valid in {git_path}")
     logger.info("Checked out {}".format(co))
     return co
@@ -206,7 +208,14 @@ def resolve_targets(repo_path: Path,
         if tar.rebase:
             sh.run("git config user.email 'bench@bitcoinperf.com'")
             sh.run("git config user.name 'Bitcoinperf'")
-            sh.run('git rebase origin/master')
+            rebasecmd = sh.run('git rebase origin/master')
+
+            if not rebasecmd.ok:
+                logger.warning(
+                    "rebase of %s failed:\n%s", tar.gitref, rebasecmd.output)
+                bad_targets.append(tar)
+                continue
+
             logger.info("Rebased %s (%s) on top of origin/master (%s)",
                         tar.gitref, sha, get_sha('origin/master'))
             pre_rebase_sha = sha

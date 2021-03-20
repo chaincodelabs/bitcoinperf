@@ -547,6 +547,7 @@ class _IbdBench(Benchmark):
             self.server_node.stop_via_rpc(timeout=120)
 
         # Copy logfile to results
+        datadirpath = self._get_datadir_path()
         debuglogpath = self._get_datadir_path() / 'debug.log'
         if debuglogpath.exists():
             shutil.copyfile(
@@ -564,16 +565,18 @@ class _IbdBench(Benchmark):
                 return
 
             if self.bench_cfg.stash_datadir.exists():
-                shutil.rmtree(self.bench_cfg.stash_datadir)
+                logger.warning(
+                    "removing existing stash_datadir (%s)",
+                    self.bench_cfg.stash_datadir)
+                sh.rm(self.bench_cfg.stash_datadir)
 
-            (self.cfg.workdir / 'data').replace(self.bench_cfg.stash_datadir)
+            shutil.move(datadirpath, self.bench_cfg.stash_datadir)
             logger.info("Stashed datadir from %s -> %s",
-                        self.cfg.workdir / 'data',
-                        self.bench_cfg.stash_datadir)
+                        datadirpath, self.bench_cfg.stash_datadir)
         else:
-            datadir = self.cfg.workdir / 'data'
-            if datadir.exists():
-                shutil.rmtree(datadir)
+            if datadirpath.exists():
+                logger.info(f"removing datadir at {datadirpath}")
+                shutil.rmtree(datadirpath)
 
 
 class IbdLocal(_IbdBench):
