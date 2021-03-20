@@ -43,6 +43,11 @@ while [ $tries -gt 0 ]; do
   if ! ~/.local/bin/bitcoinperf run ${YAML} ; then
     # On failure, back off and decrement tries
     ((tries=tries-1))
+    echo
+    echo "*************************************************"
+    echo "bitcoinperf run failed"
+    echo "*************************************************"
+    echo
     sleep 60
   else
     # Reset the counter each time we hit a success

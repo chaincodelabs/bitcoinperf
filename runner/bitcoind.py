@@ -484,7 +484,7 @@ class BuildManager:
 
         _assert_version(self.repo_path, target.gitco)
 
-        if cmd.returncode == 0 and self.cache_path:
+        if cmd.ok and self.cache_path:
             cache.save(target)
             cache.clean()
         elif self.cache_path:
@@ -540,7 +540,7 @@ class BuildCache:
 
         sh.cd(self.workdir)
         sh.rm(self.repo_path)
-        os.symlink(cache, self.repo_path)
+        shutil.copytree(cache, self.repo_path)
         _assert_version(self.repo_path, target.gitco)
         sh.cd(self.repo_path)
         return True
@@ -550,7 +550,7 @@ class BuildCache:
         files_in_cache.sort(key=os.path.getmtime, reverse=True)
 
         # TODO parameterize
-        CACHE_SIZE = 3
+        CACHE_SIZE = 5
 
         # reverse=True above because we only want to delete if we're over
         # the cache size.
