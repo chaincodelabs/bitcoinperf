@@ -168,9 +168,12 @@ def get_standard_results(runs: GroupedRuns) -> FlatResults:
 
         # Microbenches don't report memory
         if not bench_id.startswith('micro'):
-            out[total_mem_id(bench_id)] = [
-                target_to_benchlist[target].peak_rss_result()
-                for target in runs.targets]
+            try:
+                out[total_mem_id(bench_id)] = [
+                    target_to_benchlist[target].peak_rss_result()
+                    for target in runs.targets]
+            except Exception:
+                logger.warning("%s lacks memory data", bench_id)
 
         if bench_id.startswith('micro'):
             # Enumerate out all microbench results
