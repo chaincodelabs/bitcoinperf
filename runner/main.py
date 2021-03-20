@@ -77,10 +77,12 @@ def _cleanup_tmpfiles():
     sh.run(r'find /tmp/test_runner_* -mtime +3 -exec rm -rf {} \;')
 
 
-def run_full_suite(cfg):
+def run_full_suite(cfg) -> bool:
     """
     Create a tmp directory in which we will clone bitcoin, build it, and run
     various benchmarks.
+
+    Return whether we successfully completed the run.
     """
     logger.info(
         "Running benchmarks %s with compilers %s",
@@ -95,7 +97,7 @@ def run_full_suite(cfg):
 
     if bad_targets:
         logger.warning("Couldn't resolve git targets: %s", bad_targets)
-        return
+        return False
 
     config.link_latest_run(cfg)
 
@@ -141,6 +143,8 @@ def run_full_suite(cfg):
         maybe_run_bench_some_times(
             target, cfg, compiler,
             cfg.benches.reindex_chainstate, benchmarks.ReindexChainstate)
+
+    return True
 
 
 def maybe_run_bench_some_times(
@@ -188,9 +192,9 @@ def _get_shutdown_handler(cfg: config.Config):
             # For now only remove the bitcoin subdir, since that'll be far and
             # away the biggest subdir.
             sh.run("rm -rf %s" % (cfg.workdir / 'bitcoin'))
-            logger.debug("shutdown: removed bitcoin dir at %s", cfg.workdir)
+            logger.info("shutdown: removed bitcoin dir at %s", cfg.workdir)
         elif not cfg.teardown:
-            logger.debug("shutdown: leaving bitcoin dir at %s", cfg.workdir)
+            logger.info("shutdown: leaving bitcoin dir at %s", cfg.workdir)
 
     return handler
 
@@ -587,16 +591,19 @@ def run(yaml_filename: Path):
     logger.info(cfg.to_string(pretty=True))
 
     try:
-        run_full_suite(cfg)
+        completed = run_full_suite(cfg)
     except Exception:
         G.slack.send_to_slack_attachment(
             G.gitco, "Error", {},
             text=traceback.format_exc(), success=False)
         raise
 
-    _persist_results(cfg, results.ALL_RUNS)
-    _print_results()
-
+    if completed:
+        _persist_results(cfg, results.ALL_RUNS)
+        _print_results()
+    else:
+        print("run failed")
+        sys.exit(1)
 
 def _persist_results(cfg, results):
     logger.info("Getting hardware information")

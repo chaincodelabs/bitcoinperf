@@ -298,14 +298,13 @@ class Target(BaseModel):
     # commit.
     gitco: Op[GitCheckout] = None
 
-    @property
-    def cache_key(self):
+    def cache_key(self, compiler: Compilers):
         """
         A unique, shortish identifier suitable for use as an ID in a cache.
 
         TODO unittest this
         """
-        sha = util.sha256(self._hash_str)
+        sha = util.sha256(self._hash_str + str(compiler))
         ref = re.sub('[^0-9a-zA-Z]', '-', self.gitref[:16])
         return f'{ref}-{sha[:16]}'
 
@@ -349,8 +348,6 @@ class Config(BaseModel):
     teardown: bool = True
     safety_checks: bool = True
     clean: bool = True
-    cache_build: bool = False
-    cache_git: bool = False
     cache_build_size: int = 3
     codespeed: Op[Codespeed] = None
     benches: Op[Benches] = None
