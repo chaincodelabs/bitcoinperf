@@ -400,7 +400,8 @@ class BuildManager:
 
         Returns: a completed Command if we did a build, None if we used cache.
         """
-        logger.info(f"Starting build for {target.cache_key}")
+        cache_key = target.cache_key(compiler)
+        logger.info(f"Starting build for {target.id} (cache key: {cache_key})")
         makefile = self.repo_path / 'Makefile'
         sh.cd(self.repo_path)
 
@@ -423,7 +424,7 @@ class BuildManager:
         # from cache.
         os.environ['BDB_PREFIX'] = "%s/bitcoin/db4" % self.workdir
 
-        cache = BuildCache(self.workdir, self.cache_path)
+        cache = BuildCache(self.workdir, compiler, self.cache_path)
         if self.cache_path and cache.restore(target):
             return None
 
@@ -494,14 +495,17 @@ class BuildCache:
     Utility for caching built bitcoin binaries. This allows us to switch back
     and forth between benchmark targets without having to rebuild.
     """
-    def __init__(self, workdir: Path, cachedir: Path = None):
+    def __init__(self, workdir: Path, compiler: config.Compilers, cachedir: Path = None):
         self.workdir = workdir
         self.repo_path = workdir / 'bitcoin'
         self.cachedir = cachedir or (workdir / 'build-cache')
         self.cachedir.mkdir(exist_ok=True)
 
+        # The compiler used affects the cache key
+        self.compiler = compiler
+
     def _get_cache_path(self, target: config.Target):
-        return (self.cachedir / target.cache_key).resolve()
+        return (self.cachedir / target.cache_key(self.compiler)).resolve()
 
     def save(self, target: config.Target):
         cache = self._get_cache_path(target)
@@ -547,7 +551,7 @@ class BuildCache:
 
         logger.info(
             "Cached version of build %s found - "
-            "restoring from that and skipping build ", target.cache_key)
+            "restoring from that and skipping build ", target.cache_key(self.compiler))
 
         os.symlink(cache_bitcoind, srcdir / 'bitcoind')
         os.symlink(cache_bitcoincli, srcdir / 'bitcoin-cli')

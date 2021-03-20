@@ -188,9 +188,9 @@ def _get_shutdown_handler(cfg: config.Config):
             # For now only remove the bitcoin subdir, since that'll be far and
             # away the biggest subdir.
             sh.run("rm -rf %s" % (cfg.workdir / 'bitcoin'))
-            logger.debug("shutdown: removed bitcoin dir at %s", cfg.workdir)
+            logger.info("shutdown: removed bitcoin dir at %s", cfg.workdir)
         elif not cfg.teardown:
-            logger.debug("shutdown: leaving bitcoin dir at %s", cfg.workdir)
+            logger.info("shutdown: leaving bitcoin dir at %s", cfg.workdir)
 
     return handler
 
