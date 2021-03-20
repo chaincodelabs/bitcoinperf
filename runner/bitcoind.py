@@ -484,7 +484,7 @@ class BuildManager:
 
         _assert_version(self.repo_path, target.gitco)
 
-        if cmd.ok and self.cache_path:
+        if cmd.returncode == 0 and self.cache_path:
             cache.save(target)
             cache.clean()
         elif self.cache_path:
