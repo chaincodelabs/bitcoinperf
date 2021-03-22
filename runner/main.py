@@ -124,6 +124,9 @@ def run_full_suite(cfg) -> bool:
                 cfg.benches.microbench, benchmarks.Microbench)
 
         # Only do the following for gcc (since they're expensive)
+        build_step = benchmarks.Build(
+            cfg, cfg.benches.build, config.Compilers.gcc, target, 0)
+        build_step.run(cfg, cfg.benches.build)
 
         maybe_run_bench_some_times(
             target, cfg, compiler,
