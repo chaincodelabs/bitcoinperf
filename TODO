@@ -1,5 +1,10 @@
 - [ ] Upgrade Python to 3.8 on all hosts (to run test suite)
 - [ ] Add clang-12 to all build environments
+    - https://apt.llvm.org/llvm.sh install script
+    - sudo ln -s /usr/bin/clang-12 /usr/local/bin/clang
+    - sudo ln -s /usr/bin/clang++-12 /usr/local/bin/clang++
+
+- [ ] add a dedicated `make -j=1` machine
 - [ ] Upload full output from bad run to gist (or text document dump somewhere)
 - [ ] `--enable-perf` for perf-capture -> flamegraph
 - [ ] `bench-pr --configure-args 'ref:"-this-arg HEY -that-arg YO"'

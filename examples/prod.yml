@@ -22,11 +22,11 @@ benches:
   build:
     num_jobs: 1
 
-  unittests:
-    num_jobs: 3
+  # unittests:
+  #   num_jobs: 3
 
-  functests:
-    num_jobs: 1
+  # functests:
+  #   num_jobs: 1
 
   microbench:
     enabled: true
