@@ -189,7 +189,7 @@ def _get_shutdown_handler(cfg: config.Config):
 
         # Clean up to avoid filling disk
         # TODO add more granular cleanup options
-        if cfg.teardown and cfg.workdir.is_dir():
+        if cfg.teardown and (not cli.args.no_teardown) and cfg.workdir.is_dir():
             sh.cd(cfg.workdir)
             _stash_debug_file(cfg)
 
@@ -218,6 +218,7 @@ def _stash_debug_file(cfg: config.Config):
 
 cli = clii.App(description=__doc__)
 cli.add_arg('--verbose', '-v', action='store_true')
+cli.add_arg('--no-teardown', action='store_true')
 
 
 def _missing_pkgs() -> t.List[str]:
