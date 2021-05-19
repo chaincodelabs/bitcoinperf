@@ -545,9 +545,12 @@ def bench_pr(pr_num: str,
                     assert micro.gitco
                     results.append(micro)
 
-    # Only do IBD benches with gcc since they're long and we ship binaries
-    # built with gcc.
-    compiler = config.Compilers.gcc
+    if 'clang' in os.environ.get('CXX'):
+        compiler = config.Compilers.clang
+    else:
+        # Default to gcc since these tests are long and we ship binaries
+        # built with gcc.
+        compiler = config.Compilers.gcc
 
     for i, ts in enumerate([targets] * run_count):
         for target in ts:

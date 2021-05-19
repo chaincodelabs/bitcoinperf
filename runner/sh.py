@@ -107,7 +107,7 @@ class Command:
     def start(self):
         self.start_time = time.time()
         self.ps = popen(
-            '$(which time) -f %M ' + self.cmd,
+            '$(which time) -f "%M;%S;%U" ' + self.cmd,
             stdout=self.stdout_fd,
             stderr=self.stderr_fd,
         )
@@ -136,11 +136,28 @@ class Command:
         assert self.ps
         return self.ps.returncode
 
+    def time_output(self) -> t.Tuple[int, float, float]:
+        """
+        Returns (max_rss, cpu_kernel_secs, cpu_user_secs)
+        """
+        assert self.stderr
+        line = self.stderr.decode().strip().split('\n')[-1].strip()
+
+        # Based upon the `time` format specified in `start()`
+        (maxrss, cpukernel, cpuuser) = line.split(';')
+        return (int(maxrss), float(cpukernel), float(cpuuser))
+
+    def cpu_kernel_secs(self) -> float:
+        return self.time_output()[1]
+
+    def cpu_user_secs(self) -> float:
+        return self.time_output()[2]
+
     def memusage_kib(self) -> int:
         if self.returncode is None:
             return self.get_resource_usage().rss_kb
         assert self.stderr
-        return int(self.stderr.decode().strip().split('\n')[-1])
+        return self.time_output()[0]
 
     def check_for_failure(self):
         """
