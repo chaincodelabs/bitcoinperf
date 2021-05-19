@@ -134,6 +134,9 @@ class Benchmark(abc.ABC):
             self.results.command = cmd.cmd
             self.results.total_time_secs = int(cmd.total_secs)
             self.results.peak_rss_kb = cmd.memusage_kib()
+            self.results.cpu_kernel_secs = cmd.cpu_kernel_secs()
+            self.results.cpu_user_secs = cmd.cpu_user_secs()
+
             assert self.cfg.workdir
             self.results.configure_info = hwinfo.parse_configure_log(
                 self.cfg.workdir / 'bitcoin')
@@ -515,6 +518,8 @@ class _IbdBench(Benchmark):
 
         self.results.total_time_secs = final_time
         self.results.peak_rss_kb = self.client_node.cmd.memusage_kib()
+        self.results.cpu_kernel_secs = self.client_node.cmd.cpu_kernel_secs()
+        self.results.cpu_user_secs = self.client_node.cmd.cpu_user_secs()
 
         if last_resource_usage:
             self.results.height_to_data[last_height_seen] = HeightData(

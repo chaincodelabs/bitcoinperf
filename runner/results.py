@@ -34,6 +34,9 @@ class Results:
 
     # In seconds
     total_time_secs: Op[float] = None
+    cpu_kernel_secs: Op[float] = None
+    cpu_user_secs: Op[float] = None
+
     peak_rss_kb: Op[int] = None
 
     # See hwinfo.parse_configure_log()

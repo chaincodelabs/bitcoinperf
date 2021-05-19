@@ -78,6 +78,18 @@ class BenchList(t.List[Benchmark]):
             [i.results.total_time_secs for i in self],
         )
 
+    def cpu_kernel_secs_result(self) -> BenchVal:
+        return BenchVal(
+            cpu_kernel_secs_id(self[0].id),
+            [i.results.cpu_kernel_secs for i in self],
+        )
+
+    def cpu_user_secs_result(self) -> BenchVal:
+        return BenchVal(
+            cpu_user_secs_id(self[0].id),
+            [i.results.cpu_user_secs for i in self],
+        )
+
     def peak_rss_result(self) -> BenchVal:
         if not self[0].results.peak_rss_kb:
             # Some benchmarks don't track peak RSS
@@ -145,6 +157,11 @@ class GroupedRuns(t.Dict[str, t.Dict[Target, BenchList]]):
 def total_time_id(s: str) -> str:
     return s + '.total_secs'
 
+def cpu_user_secs_id(s: str) -> str:
+    return s + '.cpu_user_secs'
+
+def cpu_kernel_secs_id(s: str) -> str:
+    return s + '.cpu_kernel_secs'
 
 def total_mem_id(s: str) -> str:
     return s + '.peak_rss_KiB'
@@ -174,6 +191,11 @@ def get_standard_results(runs: GroupedRuns) -> FlatResults:
                     for target in runs.targets]
             except Exception:
                 logger.warning("%s lacks memory data", bench_id)
+
+            out[cpu_kernel_secs_id(bench_id)] = [
+                target_to_benchlist[t].cpu_kernel_secs_result() for t in runs.targets]
+            out[cpu_user_secs_id(bench_id)] = [
+                target_to_benchlist[t].cpu_user_secs_result() for t in runs.targets]
 
         if bench_id.startswith('micro'):
             # Enumerate out all microbench results
