@@ -351,7 +351,8 @@ def get_synced_node(peer_config: config.SyncedPeer,
         assert peer_config.repodir
         [co], _ = git.resolve_targets(peer_config.repodir, [target])
         git.checkout_in_dir(peer_config.repodir, target)
-        builder = BuildManager(peer_config.repodir.parent, clean=False)
+        builder = BuildManager(
+            peer_config.repodir.parent, repo_path=peer_config.repodir, clean=False)
         builder.build(target, config.Compilers.gcc)
         logger.info(f'Finished build for synced peer ({peer_config})')
 
@@ -375,8 +376,9 @@ class BuildManager:
 
     def __init__(self,
                  workdir: Path,
-                 cache_path: Path = None,
-                 clean: bool = True):
+                 cache_path: t.Optional[Path] = None,
+                 clean: bool = True,
+                 repo_path: Path = None):
         """
         Args:
             cache_path: if given, cache builds at this location.
@@ -385,7 +387,7 @@ class BuildManager:
         self.workdir = workdir
         self.cache_path = cache_path
         self.clean = clean
-        self.repo_path = self.workdir / 'bitcoin'
+        self.repo_path = repo_path or self.workdir / 'bitcoin'
 
     def build(self,
               target: config.Target,
@@ -423,7 +425,7 @@ class BuildManager:
         num_jobs = num_jobs or config.DEFAULT_NPROC
         # Important that we set this envvar before potentially early-exiting
         # from cache.
-        os.environ['BDB_PREFIX'] = "%s/bitcoin/db4" % self.workdir
+        os.environ['BDB_PREFIX'] = "%s/db4" % self.repo_path
 
         cache = BuildCache(self.workdir, compiler, self.cache_path)
         if self.cache_path and cache.restore(target):
