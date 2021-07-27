@@ -458,9 +458,17 @@ def bench_pr(pr_num: str,
     logging.configure_logger(workdir, 'DEBUG' if cli.args.verbose else 'INFO')
     repodir = workdir / 'bitcoin'
 
+    # If pr_num is [remote]/[ref], just use that as it isn't actually PR.
+    if '/' in pr_num:
+        name = pr_num
+        gitref = pr_num
+    else:
+        name = f"#{pr_num}"
+        gitref = f'pr/{pr_num}'
+
     targets = [
         config.Target(
-            name=f"#{pr_num}", gitref=f'pr/{pr_num}', rebase=False,
+            name=name, gitref=gitref, rebase=False,
             bitcoind_extra_args=bitcoind_args),
     ]
 
