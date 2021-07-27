@@ -186,8 +186,8 @@ def resolve_targets(repo_path: Path,
         else:
             sha_res = sh.run(f'git rev-parse {tar.gitremote}/{tar.gitref}')
             if not sha_res.ok:
-                logger.debug("Couldn't parse rev {tar.gitremote}/{tar.gitref}; "
-                             "trying {tar.gitref}")
+                logger.debug(f"Couldn't parse rev {tar.gitremote}/{tar.gitref}; "
+                             f"trying {tar.gitref}")
                 # Fall back to just trying the ref, no remote. Sometimes for
                 # tags this is necessary.
                 sha_res = sh.run(f'git rev-parse {tar.gitref}')
