@@ -461,14 +461,15 @@ def bench_pr(pr_num: str,
     # If pr_num is [remote]/[ref], just use that as it isn't actually PR.
     if '/' in pr_num:
         name = pr_num
-        gitref = pr_num
+        gitremote, gitref = pr_num.split('/')
     else:
         name = f"#{pr_num}"
+        gitremote = 'origin'
         gitref = f'pr/{pr_num}'
 
     targets = [
         config.Target(
-            name=name, gitref=gitref, rebase=False,
+            name=name, gitref=gitref, gitremote=gitremote, rebase=False,
             bitcoind_extra_args=bitcoind_args),
     ]
 
