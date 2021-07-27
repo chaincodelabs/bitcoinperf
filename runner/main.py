@@ -554,7 +554,7 @@ def bench_pr(pr_num: str,
                     assert micro.gitco
                     results.append(micro)
 
-    if 'clang' in os.environ.get('CXX'):
+    if 'clang' in os.environ.get('CXX', ''):
         compiler = config.Compilers.clang
     else:
         # Default to gcc since these tests are long and we ship binaries
