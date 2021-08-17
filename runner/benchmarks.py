@@ -86,7 +86,10 @@ class Benchmark(abc.ABC):
             idx = len(list(self.cfg.workdir.glob(prefix + "*")))
 
             if idx != self.run_idx:
-                logger.warning("Unexpected drift in run index from artifacts index")
+                logger.warning(
+                    "Unexpected drift in run index from artifacts index "
+                    f"({prefix}: got {idx}, expected {self.run_idx})"
+                )
 
             path = self.cfg.workdir / (prefix + f".{idx}")
             path.mkdir(parents=True)
