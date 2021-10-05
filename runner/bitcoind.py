@@ -479,6 +479,9 @@ class BuildManager:
 
         if not conf.ok:
             logger.error(conf.failure_msg(f"configure failed for {target}"))
+            if copy_log_to:
+                sh.run(f'cp config.log {copy_log_to}/config.log')
+                logger.info("Saved configure output to %s", copy_log_to)
             raise RuntimeError('configure failed')
 
         logger.info(f"Running make -j {num_jobs}")
