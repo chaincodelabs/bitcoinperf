@@ -196,9 +196,10 @@ class Build(Benchmark):
         )
         if cmd:  # i.e. if not cached
             self._report_results(cmd)
-            raise RuntimeError(
-                f"{self.target} failed to build with {self.compiler} "
-                f"({self.artifacts_dir})")
+            if cmd.returncode != 0:
+                raise RuntimeError(
+                    f"{self.target} failed to build with {self.compiler} "
+                    f"({self.artifacts_dir})")
 
         shutil.copyfile(
             builder.repo_path / "config.log", self.artifacts_dir / "config.log"

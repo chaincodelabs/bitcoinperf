@@ -354,7 +354,13 @@ def get_synced_node(peer_config: config.SyncedPeer,
         git.checkout_in_dir(peer_config.repodir, target)
         builder = BuildManager(
             peer_config.repodir.parent, repo_path=peer_config.repodir, clean=False)
-        builder.build(target, config.Compilers.gcc)
+        cmd = builder.build(target, config.Compilers.gcc)
+
+        if cmd and cmd.returncode != 0:  # i.e. if build was not cached
+            raise RuntimeError(
+                f"{target} (synced peer) failed to build with gcc "
+                f"({peer_config})")
+
         logger.info(f'Finished build for synced peer ({peer_config})')
 
         _built_peer_cache[peer_config] = True
