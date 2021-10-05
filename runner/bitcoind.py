@@ -5,6 +5,7 @@ import socket
 import shutil
 import os
 import glob
+import textwrap
 from pathlib import Path
 
 from . import sh, logging, config, git
@@ -483,6 +484,12 @@ class BuildManager:
             (copy_log_to / 'make.stdout').write_bytes(cmd.stdout or b'')
             (copy_log_to / 'make.stderr').write_bytes(cmd.stderr or b'')
             logger.info("Saved make output to %s", copy_log_to)
+
+        if cmd.returncode != 0:
+            # make failed; compilation error?
+            comp_err = textwrap.indent('\n'.join(cmd.stderr_lines), '  ')
+            logger.warning(f"make failed; compilation error:\n{comp_err}")
+            return cmd
 
         _assert_version(self.repo_path, target.gitco)
 

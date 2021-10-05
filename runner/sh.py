@@ -126,6 +126,16 @@ class Command:
         os.unlink(self.stderr_path)
 
     @property
+    def stderr_lines(self) -> t.List[str]:
+        assert self.stderr
+        return [i.decode() for i in self.stderr.splitlines()]
+
+    @property
+    def stdout_lines(self) -> t.List[str]:
+        assert self.stdout
+        return [i.decode() for i in self.stdout.splitlines()]
+
+    @property
     def total_secs(self) -> float:
         assert self.start_time
         start = float(self.start_time)
