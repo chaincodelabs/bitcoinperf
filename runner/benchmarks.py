@@ -85,7 +85,9 @@ class Benchmark(abc.ABC):
             prefix = f"artifacts-{self.id}-{self.gitco.ref}"
             idx = len(list(self.cfg.workdir.glob(prefix + "*")))
 
-            if idx != self.run_idx:
+            # TODO second half of the clause is a hack; figure out why the build
+            # step erroneously doesn't bump the run_idx.
+            if idx != self.run_idx and 'build' not in self.name:
                 logger.warning(
                     "Unexpected drift in run index from artifacts index "
                     f"({prefix}: got {idx}, expected {self.run_idx})"
