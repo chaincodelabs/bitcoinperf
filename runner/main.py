@@ -74,8 +74,18 @@ def _startup_assertions(cfg):
         warn("swap should be disabled during benchmarking")
 
     avg, _, _ = os.getloadavg()
-    if avg > 1.0:
-        warn(f"1min load average high: {avg}")
+    load_tries = 10
+
+    while avg > 1.0:
+        if load_tries > 0:
+            wait = 30
+            logger.info(f"1min load average high: {avg}; waiting {wait}s to cool down")
+            load_tries -= 1
+            time.sleep(wait)
+        else:
+            warn(f"1min load average high: {avg}")
+            break
+        avg, _, _ = os.getloadavg()
 
     if not _try_acquire_lockfile():
         raise RuntimeError("Couldn't acquire lockfile %s; exiting", LOCKFILE_PATH)
