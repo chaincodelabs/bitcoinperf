@@ -216,10 +216,10 @@ def resolve_targets(repo_path: Path,
                 bad_targets.append(tar)
                 continue
 
-            logger.info("Rebased %s (%s) on top of origin/master (%s)",
-                        tar.gitref, sha, get_sha('origin/master'))
             pre_rebase_sha = sha
             sha = get_sha('HEAD')
+            logger.info("Rebased %s (%s) on top of origin/master (%s): %r",
+                        tar.gitref, pre_rebase_sha, get_sha('origin/master'), sha)
 
         msg = get_commit_msg(sha)
         co = GitCheckout(

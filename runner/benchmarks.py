@@ -327,6 +327,7 @@ class _IbdBench(Benchmark):
         return self.server_node
 
     def _get_dbcache(self) -> str:
+        assert self.client_node
         assert self.client_node.cmd
         for i in self.client_node.cmd.cmd.split():
             if i.startswith("-dbcache="):
