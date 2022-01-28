@@ -1,4 +1,4 @@
-FROM python:3.8-buster
+FROM docker.io/library/python:3.8-buster
 
 COPY ./bin/install.sh /usr/bin/provision
 RUN /usr/bin/provision

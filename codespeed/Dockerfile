@@ -1,4 +1,4 @@
-FROM python:3.6.3
+FROM docker.io/library/python:3.6.3
 ENV PYTHONUNBUFFERED 1
 RUN mkdir /code && mkdir /repos && git clone https://github.com/bitcoin/bitcoin.git /repos/bitcoin
 WORKDIR /code

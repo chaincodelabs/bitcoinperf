@@ -14,12 +14,12 @@ services:
       - ./codespeed:/code
 
   sqlmigrate:
-    image: ruby:2.5
+    image: docker.io/library/ruby:2.5
     volumes:
       - .:/data
 
   grafana:
-    image: grafana/grafana
+    image: docker.io/grafana/grafana
     ports:
       - "3000:3000"
     environment:

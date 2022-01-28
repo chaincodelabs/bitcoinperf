@@ -18,6 +18,8 @@ services:
       - /data/bitcoinperf:/root/.bitcoinperf
 
   codespeed:
+    build:
+      context: ./codespeed
     ports:
       - "8000:8000"
     environment:
@@ -28,7 +30,7 @@ services:
       - psql
 
   psql:
-    image: postgres:10
+    image: docker.io/library/postgres:10
     environment:
       POSTGRES_USER: codespeed
       POSTGRES_PASSWORD: foobar00
