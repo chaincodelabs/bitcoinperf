@@ -51,7 +51,37 @@ peer_path = config_path / "peer"
 peer_repo = peer_path / "bitcoin"
 peer_datadir = peer_path / "datadir"
 base_datadirs = config_path / "base_datadirs"
-pruned_500k_datadir = base_datadirs / "pruned-500k"
+
+
+@dataclass
+class PrunedDatadir:
+    """
+    Pre-built pruned datadirs that allow us to immediately resume IBD from a certain
+    point for the sake of benchmarking.
+    """
+    path: Path
+    height: int
+    filename: str
+    description: str
+
+
+# These are regions of the chain that we can benchmark based upon pruned
+# datadirs that are hosted at
+# https://storage.googleapis.com/chaincode-bitcoinperf.
+#
+# Order important for downlaod in `setup()`; default should come first.
+CHAIN_REGIONS = {
+    "2021-02": PrunedDatadir(
+        base_datadirs / "pruned-667200", 667_200, "pruned_667200.tar.gz",
+        "Pre-taproot, post-segwit",
+    ),
+    "2017-12": PrunedDatadir(
+        base_datadirs / "pruned-500k", 500_000, "pruned_500k.tar.gz",
+        "A few months before segwit activation",
+    ),
+}
+
+DEFAULT_REGION = CHAIN_REGIONS['2021-02']
 
 
 class Compilers(str, Enum):
@@ -253,13 +283,12 @@ class BenchIbdRangeFromLocal(IBDishBench):
 
     @validator("src_datadir", pre=True, always=True)
     def find_src_datadir(cls, v):
-        pruned_500k = base_datadirs / "pruned-500k"
-        if not v and pruned_500k.exists():
+        if not v and DEFAULT_REGION.path.exists():
             logger.info(
                 "No src_datadir specified for BenchIbdRangeFromLocal - "
-                "defaulting to found pruned-500k datadir."
+                f"defaulting to {DEFAULT_REGION.path}."
             )
-            return pruned_500k
+            return DEFAULT_REGION.path
         return Path(v)
 
 
