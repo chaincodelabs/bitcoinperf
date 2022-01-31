@@ -1,0 +1,47 @@
+---
+
+# Cache a built bitcoin src directory and restore it from the cache on
+# subsequent runs.
+cache_build: true
+
+# If true, the first git clone will be cached and copied from as necessary.
+cache_git: true
+
+# Set to false to make cache dropping optional and bypass various safety checks.
+safety_checks: false
+
+compilers:
+  - gcc
+
+synced_peer:
+  datadir: /data2/bitcoin
+  repodir: /home/james/src/bitcoinbench
+  bitcoind_extra_args: ''
+
+  # or, if over network
+  #
+  # address:
+
+
+benches:
+  build:
+    num_jobs: 15
+  
+  ibd_range_from_local:
+    run_count: 3
+    start_height: 667_200
+    end_height: 700_000
+    src_datadir: /home/james/.bitcoinperf/base_datadirs/pruned-667200
+
+
+to_bench:
+
+  - gitref: bench/ctv
+    gitremote: jamesob
+    bitcoind_extra_args: '-dbcache=8000 -assumevalid=0'
+    rebase: false
+
+  - gitref: $mergebase
+    bitcoind_extra_args: '-dbcache=8000 -assumevalid=0'
+    rebase: false
+
