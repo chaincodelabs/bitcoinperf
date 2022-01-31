@@ -218,7 +218,7 @@ def resolve_targets(repo_path: Path,
 
             pre_rebase_sha = sha
             sha = get_sha('HEAD')
-            logger.info("Rebased %s (%s) on top of origin/master (%s): %r",
+            logger.info("Rebased %s (%s) on top of origin/master (%s): %s",
                         tar.gitref, pre_rebase_sha, get_sha('origin/master'), sha)
 
         msg = get_commit_msg(sha)
@@ -237,11 +237,11 @@ def resolve_targets(repo_path: Path,
 
 
 def get_sha(ref: str) -> str:
-    return sh.run(f'git rev-parse {ref}').stdout.strip()
+    return sh.run(f'git rev-parse {ref}', check=True).stdout.strip()
 
 
 def get_commit_msg(ref: str) -> str:
-    return sh.run(f'git log -1 --pretty=%B {ref}').stdout.strip()
+    return sh.run(f'git log -1 --pretty=%B {ref}', check=True).stdout.strip()
 
 
 def get_git_mergebase(repo_path: Path, remote: str, name: str) -> str:

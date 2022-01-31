@@ -156,9 +156,7 @@ def run_full_suite(cfg) -> bool:
         compiler = config.Compilers.gcc
 
         # Only do the following for gcc (since they're expensive)
-        build_step = benchmarks.Build(
-            cfg, cfg.benches.build, compiler, target, 0
-        )
+        build_step = benchmarks.Build(cfg, cfg.benches.build, compiler, target, 0)
         build_step.run(cfg, cfg.benches.build)
 
         maybe_run_bench_some_times(
@@ -281,6 +279,12 @@ def setup():
     """
     from .thirdparty import color as c  # type: ignore
 
+    def warn(*args, **kwargs):
+        print(c.yellow(dedent(*args, **kwargs)))
+
+    def scare(*args, **kwargs):
+        print(c.red(c.bold(dedent(*args, **kwargs))))
+
     catchphrase = random.choice(
         [
             "let's be honest, it's basically your only option",
@@ -324,11 +328,8 @@ def setup():
 
     _15m_load = os.getloadavg()[-1] > 1.0
     if _15m_load > 1.0:
-        print(
-            c.yellow(
-                c.bold(
-                    dedent(
-                        f"""
+        warn(
+            f"""
             Warning: I've noticed your load is highish (15m avg: {_15m_load}).
 
             Please note that benchmark results are very suspect when run on
@@ -336,9 +337,6 @@ def setup():
             with the computer, the load may vary while bitcoinperf runs,
             skewing results.
         """
-                    )
-                )
-            )
         )
 
         ent()
@@ -390,28 +388,19 @@ def setup():
             sys.stdout.flush()
             time.sleep(0.8)
         else:
-            print(
-                c.red(
-                    c.bold(
-                        dedent(
-                            f"""
+            scare(
+                f"""
                 !! You'll need to provide a repo for the synced peer to
                    use at {config.peer_repo}, or use the networked peer option
                    (see config:SyncedPeer.address).
 
                    You can symlink a repo, if that floats your boat.
             """
-                        )
-                    )
-                )
             )
 
     if not config.peer_datadir.exists():
-        print(
-            c.red(
-                c.bold(
-                    dedent(
-                        f"""
+        scare(
+            f"""
             !! You'll also need to provide the synced peer with a
                populated datadir at
 
@@ -421,9 +410,6 @@ def setup():
                above the range you want to benchmark (probably above at least
                550,000).
         """
-                    )
-                )
-            )
         )
 
         print(
@@ -445,54 +431,55 @@ def setup():
     if not config.base_datadirs.exists():
         config.base_datadirs.mkdir()
 
-    if not config.pruned_500k_datadir.exists():
-        print(
-            dedent(
-                """
-            To do meaningful benchmarking, we often have to look at a region
-            of the chain that is well past the first few hundred thousand
-            blocks, since these blocks are not characteristic of where the
-            IBD process bottlenecks.
+    print(
+        dedent(
+            f"""
+        To do meaningful benchmarking, we often have to look at a region
+        of the chain that is well past the first few hundred thousand
+        blocks, since these blocks are not characteristic of where the
+        IBD process bottlenecks.
 
-            To this end, you can download a datadir that is pre-synced up to
-            height 500k. We will seed the benchmark node from this datadir so
-            that you can immediately start the benchmark from a part of the
-            chain that is meaningful to examine for overall performance.
-        """
-            )
+        To this end, you can download datadirs that are pre-synced up to
+        a certain height. We will seed the benchmark node
+        from these datadir so that you can immediately start the
+        benchmark from a part of the chain that is meaningful to
+        examine for overall performance.
+
+        There are a few regions of the chain available, though the default
+        is {config.DEFAULT_REGION}
+
+        You will be prompted if you'd like to download each, though only
+        the first is used by default.
+    """
         )
+    )
 
-        prompt = "Download pre-synced, pruned 500k block datadir? [Y/n] "
-        if yn(prompt):
-            url = "https://storage.googleapis.com/chaincode-bitcoinperf/pruned_500k.tar.gz"  # noqa
-            print(f"Downloading and decompressing {url}...")
-            print("└─ this will take about 15 minutes")
-            sh.run(f"cd {config.base_datadirs} && curl {url} | tar xvz")
-            sh.run(
-                f"cd {config.base_datadirs} && "
-                f"mv data/bitcoin_pruned_500k {config.pruned_500k_datadir} &&"
-                f"rmdir data"
-            )
-            print(
-                c.green(
-                    f"Datadir pruned to 500k stored at " f"{config.pruned_500k_datadir}"
-                )
-            )
-        else:
-            print(
-                c.red(
-                    c.bold(
-                        dedent(
-                            f"""
-                Be warned: `bitcoinperf bench-pr` will not work out of the box
-                without a datadir synced to 500k at
+    for region in config.CHAIN_REGIONS.values():
 
-                    {config.pruned_500k_datadir}
-                """
-                        )
-                    )
-                )
+        if not region.path.exists():
+            prompt = (
+                f"Download pre-synced, pruned {region.height} block datadir? [Y/n] "
             )
+            if yn(prompt):
+                url = f"https://storage.googleapis.com/chaincode-bitcoinperf/{region.filename}"  # noqa
+                print(f"Downloading and decompressing {url}...")
+                print("└─ this will take about 15 minutes (~5.5GB down)")
+                sh.run(
+                    f"cd {config.base_datadirs} && "
+                    f"mkdir -p {region.path} && cd {region.path} && ( curl {url} | tar -xzv )",
+                    check=True
+                )
+                print(c.green(f"Download of {region} complete"))
+
+            elif region == config.DEFAULT_REGION:
+                scare(
+                    f"""
+                    Be warned: `bitcoinperf bench-pr` will not work out of the box
+                    without the default prebuilt datadir {region}
+                    """
+                )
+            else:
+                print("Region skipped")
 
     print(
         c.blue(
@@ -545,6 +532,12 @@ def setup():
     )
 
 
+def die(*args, **kwargs):
+    kwargs.setdefault("file", sys.stderr)
+    print(*args, **kwargs)
+    sys.exit(1)
+
+
 @cli.cmd
 def bench_pr(
     pr_num: str,
@@ -556,10 +549,12 @@ def bench_pr(
     run_micros: bool = False,
     compare_ref: str = "",
     bitcoind_args: str = "",
+    chain_region: str = "2021-02",
 ):
     """
     Benchmark a PR relative to its merge base for some number of blocks,
-    starting from height 500_000.
+    starting from a variable region of the chain (`chain_region`). By default,
+    IBD starts from height 667,200 (2021-02).
 
     Args:
         run_id: label for the run - will create /tmp/bitcoinperf-[run_id]
@@ -570,9 +565,15 @@ def bench_pr(
         run_micros: if true, run the microbenchmarks
         compare_ref: compare the PR against this git ref instead of inferred mergebase
         bitcoind_args: additional arguments to pass to bitcoind invocations
+        chain_region: which region of the chain to benchmark from. Choices are: 2021-02, 2017-12
     """
     run_id = run_id or pr_num
     workdir = Path(f"/tmp/bitcoinperf-{run_id}")
+
+    if chain_region not in config.CHAIN_REGIONS:
+        die(f"chain_region must be in {config.CHAIN_REGIONS}")
+    elif not (pruned_datadir := config.CHAIN_REGIONS[chain_region]).path.exists():
+        die(f"pruned datadir {pruned_datadir.path} not found - try `bitcoinperf setup`")
 
     if workdir.exists():
         logger.warning(f"Removing existing (old?) workdir {workdir}")
@@ -634,7 +635,7 @@ def bench_pr(
         sys.exit(1)
 
     # This is hardcoded per the preexisting datadir.
-    start_height = 500_000
+    start_height = pruned_datadir.height
     end_height = start_height + num_blocks
 
     peer_args: t.Dict[str, t.Union[str, Path]] = {}
@@ -658,7 +659,7 @@ def bench_pr(
 
     build_config = config.BenchBuild()
     ibd_config = config.BenchIbdRangeFromLocal(
-        src_datadir=config.pruned_500k_datadir,
+        src_datadir=pruned_datadir.path,
         start_height=start_height,
         end_height=end_height,
     )
