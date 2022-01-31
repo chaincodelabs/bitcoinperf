@@ -331,8 +331,10 @@ def _find_unused_port(startval=8888) -> int:
 _built_peer_cache: t.Dict[config.SyncedPeer, bool] = {}
 
 
-def get_synced_node(peer_config: config.SyncedPeer,
-                    required_height: int = None) -> t.Optional[Node]:
+def get_synced_node(
+    cfg: config.Config,
+    peer_config: config.SyncedPeer,
+    required_height: int = None) -> t.Optional[Node]:
     """
     Spawns a bitcoind instance that has a synced chain high enough to service
     an IBD up to the last checkpoint (`--ibd-checkpoints`).
@@ -353,7 +355,11 @@ def get_synced_node(peer_config: config.SyncedPeer,
         [co], _ = git.resolve_targets(peer_config.repodir, [target])
         git.checkout_in_dir(peer_config.repodir, target)
         builder = BuildManager(
-            peer_config.repodir.parent, repo_path=peer_config.repodir, clean=False)
+            peer_config.repodir.parent,
+            repo_path=peer_config.repodir,
+            # Caching maybe not needed since we disable clean?
+            # cache_path=cfg.build_cache_path(),
+            clean=False)
         cmd = builder.build(target, config.Compilers.gcc)
 
         if cmd and cmd.returncode != 0:  # i.e. if build was not cached
@@ -438,7 +444,7 @@ class BuildManager:
         if self.cache_path and cache.restore(target):
             return None
 
-        if makefile.exists():
+        if makefile.exists() and self.clean:
             logger.info('Running make clean')
             sh.run('make clean')
 

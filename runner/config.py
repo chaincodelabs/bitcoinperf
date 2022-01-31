@@ -25,7 +25,7 @@ logger = logging.get_logger()
 # Get physical memory specs
 MEM_GIB = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024.0 ** 3)
 
-DEFAULT_NPROC = min(4, int(multiprocessing.cpu_count()))
+DEFAULT_NPROC = max(1, int(multiprocessing.cpu_count()) - 1)
 
 HOSTNAME = socket.gethostname()
 BENCH_NAMES = {

@@ -323,7 +323,7 @@ class _IbdBench(Benchmark):
             logger.info(f"using networked synced peer at {peer.address}")
             return None
 
-        self.server_node = bitcoind.get_synced_node(peer)
+        self.server_node = bitcoind.get_synced_node(self.cfg, peer)
         return self.server_node
 
     def _get_dbcache(self) -> str:
@@ -366,8 +366,15 @@ class _IbdBench(Benchmark):
         if self.server_node:
             server_blockchaininfo = self.server_node.call_rpc("getblockchaininfo")
             client_blockchaininfo = self.client_node.call_rpc("getblockchaininfo")
+            assert server_blockchaininfo
+            assert client_blockchaininfo
+
             server_blocks = server_blockchaininfo["blocks"]
+            client_blocks = client_blockchaininfo["blocks"]
             client_headers = client_blockchaininfo["headers"]
+
+            start_delta = abs(client_blocks - bench_cfg.start_height)
+            allowable_start_diff = 10
 
             if server_blocks < bench_cfg.end_height:
                 raise RuntimeError(
@@ -378,7 +385,7 @@ class _IbdBench(Benchmark):
                     ).format(server_blocks, bench_cfg.end_height, bench_cfg.end_height)
                 )
 
-            if server_blocks <= client_headers:
+            elif server_blocks < client_headers:
                 raise RuntimeError(
                     (
                         "Server blocks ({}) must be greater than client headers "
@@ -388,6 +395,17 @@ class _IbdBench(Benchmark):
                         "Sync the server's datadir to a height past {}."
                     ).format(server_blocks, client_headers, client_headers)
                 )
+
+            elif server_blocks <= client_blocks:
+                raise RuntimeError(
+                    f"Server blocks ({server_blocks}) must be greater than client "
+                    f"blocks ({client_blocks})."
+                )
+
+            elif start_delta > allowable_start_diff:
+                raise RuntimeError(
+                    "The client is starting IBD at an unexpected position: "
+                    f"{client_blocks} (vs. {bench_cfg.start_height})")
 
         extra_data = {
             "start_height": bench_cfg.start_height,
