@@ -478,7 +478,8 @@ class BuildManager:
             configure_prefix +
             './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
             'BDB_CFLAGS="-I${BDB_PREFIX}/include" ' +
-            ' {} '.format(target.configure_args) +
+            '--without-gui ' +  # TODO maybe make this configurable?
+            target.configure_args +
             # Ensure ccache is disabled so that subsequent make runs
             # are timed accurately.
             '--disable-ccache ' + boostflags)
