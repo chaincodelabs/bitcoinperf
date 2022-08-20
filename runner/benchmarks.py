@@ -242,7 +242,7 @@ class Microbench(Benchmark):
 
         outpath = self.artifacts_dir / f"{self.id}_results"
         # TODO: use sh.Command, report peak memory usage - maybe per bench?
-        cmd_str += f" -output_csv={outpath} > /dev/null && cat {outpath}"
+        cmd_str += f" -output-csv={outpath} > /dev/null && cat {outpath}"
 
         microbench_ps = popen(cmd_str)
         (microbench_stdout, microbench_stderr) = microbench_ps.communicate()
@@ -266,6 +266,7 @@ class Microbench(Benchmark):
                 )
             else:
                 logger.warning(f"{msg} on {self.gitco}:\n{text}")
+            return
 
         microbench_lines = [
             # Skip the first line (header)
