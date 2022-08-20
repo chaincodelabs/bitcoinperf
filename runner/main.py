@@ -743,7 +743,7 @@ def run(yaml_filename: Path):
         config.HOSTNAME,
         cfg.codespeed.envname if cfg.codespeed else "[none]",
     )
-    logger.info(cfg.to_string(pretty=True))
+    logger.info(str(cfg))
 
     try:
         completed = run_full_suite(cfg)
