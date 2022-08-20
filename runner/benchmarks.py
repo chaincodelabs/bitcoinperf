@@ -376,6 +376,12 @@ class _IbdBench(Benchmark):
             start_delta = abs(client_blocks - bench_cfg.start_height)
             allowable_start_diff = 10
 
+            if bench_cfg.start_height == 0:
+                # When starting from nothing, blocks come so quickly that we may well
+                # have connected a bunch before detecting an active RPC connection.
+                # Allow for this.
+                allowable_start_diff = 500
+
             if server_blocks < bench_cfg.end_height:
                 raise RuntimeError(
                     (
