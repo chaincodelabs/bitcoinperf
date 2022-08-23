@@ -397,6 +397,12 @@ class Config(BaseModel):
     codespeed: Op[Codespeed] = None
     benches: Op[Benches] = None
 
+    def __init__(self, **data):
+        super().__init__(**data)
+
+        if not self.benches.build:
+            self.benches.build = BenchBuild()
+
     @validator("workdir", pre=True, always=True)
     def mk_workdir(cls, v):
         if not v:

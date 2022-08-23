@@ -19,9 +19,6 @@ slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
 
 benches:
-  # build:
-  #   num_jobs: 1
-
   # unittests:
   #   num_jobs: 3
 
@@ -36,7 +33,9 @@ benches:
     stash_datadir: /tmp/datadir
     time_heights:
       - 522_000
-    end_height: 522_000
+      - 650_000
+      - 750_000
+    end_height: 750_000
 
   reindex:
     # Restash the datadir once we're done indexing so we can run
@@ -45,13 +44,17 @@ benches:
     src_datadir: /tmp/datadir
     time_heights:
       - 522_000
-    end_height: 522_000
+      - 650_000
+      - 750_000
+    end_height: 750_000
 
   reindex_chainstate:
     src_datadir: /tmp/datadir
     time_heights:
       - 522_000
-    end_height: 522_000
+      - 650_000
+      - 750_000
+    end_height: 750_000
 
 
 to_bench:

@@ -324,7 +324,8 @@ class _IbdBench(Benchmark):
             logger.info(f"using networked synced peer at {peer.address}")
             return None
 
-        self.server_node = bitcoind.get_synced_node(self.cfg, peer)
+        self.server_node = bitcoind.get_synced_node(
+            self.cfg, peer, required_height=self.bench_cfg.start_height)
         return self.server_node
 
     def _get_dbcache(self) -> str:
