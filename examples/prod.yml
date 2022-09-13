@@ -59,4 +59,4 @@ benches:
 
 to_bench:
   - gitref: master
-    bitcoind_extra_args: '-dbcache=2048 -txindex=1'
+    bitcoind_extra_args: '-dbcache=2048 -prune=10000'
