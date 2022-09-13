@@ -204,7 +204,7 @@ class SyncedPeer(BaseModel):
     address: Op[NodeAddr] = None
 
     # The ref that will be checked out on this peer.
-    gitref: Op[str] = "v22.0rc2"
+    gitref: Op[str] = None
 
     # TODO actually use this
     def validate_either_or(self, data):

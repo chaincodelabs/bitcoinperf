@@ -334,7 +334,9 @@ _built_peer_cache: t.Dict[config.SyncedPeer, bool] = {}
 def get_synced_node(
     cfg: config.Config,
     peer_config: config.SyncedPeer,
-    required_height: int = None) -> t.Optional[Node]:
+    required_height: t.Optional[int] = None,
+    target: t.Optional[config.Target] = None,
+) -> t.Optional[Node]:
     """
     Spawns a bitcoind instance that has a synced chain high enough to service
     an IBD up to the last checkpoint (`--ibd-checkpoints`).
@@ -350,15 +352,14 @@ def get_synced_node(
 
     if peer_config.gitref and not _built_peer_cache.get(peer_config):
         logger.info(f'Starting build for synced peer ({peer_config})')
-        target = config.Target(gitref=peer_config.gitref, rebase=False)
+        target = target or config.Target(gitref=peer_config.gitref, rebase=False)
         assert peer_config.repodir
         [co], _ = git.resolve_targets(peer_config.repodir, [target])
         git.checkout_in_dir(peer_config.repodir, target)
         builder = BuildManager(
             peer_config.repodir.parent,
             repo_path=peer_config.repodir,
-            # Caching maybe not needed since we disable clean?
-            # cache_path=cfg.build_cache_path(),
+            cache_path=cfg.build_cache_path(),
             clean=False)
         cmd = builder.build(target, config.Compilers.gcc)
 

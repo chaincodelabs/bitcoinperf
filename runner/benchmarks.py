@@ -324,8 +324,17 @@ class _IbdBench(Benchmark):
             logger.info(f"using networked synced peer at {peer.address}")
             return None
 
+        peer_target = None
+
+        if not peer.gitref:
+            assert self.target.gitco
+            peer.gitref = self.target.gitco.sha
+            peer_target = self.target
+            logger.info(
+                "set synced peer to mirror checkout under test (%s)", peer.gitref)
+
         self.server_node = bitcoind.get_synced_node(
-            self.cfg, peer, required_height=self.bench_cfg.start_height)
+            self.cfg, peer, required_height=self.bench_cfg.start_height, target=peer_target)
         return self.server_node
 
     def _get_dbcache(self) -> str:
@@ -342,15 +351,22 @@ class _IbdBench(Benchmark):
     def _get_codespeed_bench_name(self, current_height) -> str:
         assert isinstance(self.bench_cfg, config.IBDishBench)
 
+        extra_args = (
+            self.target.bitcoind_extra_args
+            .replace(' ', '')
+            .strip('-')
+        )
+
         if self.bench_cfg.start_height:
-            fmt = "{self.name}.{start_height}.{current_height}"
+            fmt = "{self.name}.{extra_args}.{start_height}.{current_height}"
         else:
-            fmt = "{self.name}.{current_height}"
+            fmt = "{self.name}.{extra_args}.{current_height}"
 
         return fmt.format(
             self=self,
             current_height=current_height,
             start_height=self.bench_cfg.start_height,
+            extra_args=extra_args,
         )
 
     def _run(self, cfg, bench_cfg):
