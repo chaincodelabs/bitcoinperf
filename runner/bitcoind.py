@@ -437,9 +437,6 @@ class BuildManager:
                     self.repo_path, target.gitco.commit_msg, msg))
 
         num_jobs = num_jobs or config.DEFAULT_NPROC
-        # Important that we set this envvar before potentially early-exiting
-        # from cache.
-        os.environ['BDB_PREFIX'] = "%s/db4" % self.repo_path
 
         cache = BuildCache(self.workdir, compiler, self.cache_path)
         if self.cache_path and cache.restore(target):
@@ -448,10 +445,6 @@ class BuildManager:
         if makefile.exists() and self.clean:
             logger.info('Running make clean')
             sh.run('make clean')
-
-        if not (self.repo_path / 'db4').exists():
-            logger.info("Retrieving db4")
-            assert sh.run("./contrib/install_db4.sh .").ok
 
         if not (self.repo_path / 'configure').exists():
             logger.info("Running autogen.sh")
@@ -477,8 +470,7 @@ class BuildManager:
         logger.info("Running ./configure ...")
         conf = sh.run(
             configure_prefix +
-            './configure BDB_LIBS="-L${BDB_PREFIX}/lib -ldb_cxx-4.8" '
-            'BDB_CFLAGS="-I${BDB_PREFIX}/include" ' +
+            './configure --with-incompatible-bdb ' +
             '--without-gui ' +  # TODO maybe make this configurable?
             target.configure_args +
             # Ensure ccache is disabled so that subsequent make runs

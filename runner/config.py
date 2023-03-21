@@ -400,6 +400,9 @@ class Config(BaseModel):
     def __init__(self, **data):
         super().__init__(**data)
 
+        if not self.benches:
+            self.benches = Benches()
+
         if not self.benches.build:
             self.benches.build = BenchBuild()
 
