@@ -6,12 +6,13 @@ import multiprocessing
 import re
 from typing import Optional as Op
 import typing as t
+from typing_extensions import Annotated
 from typing import TYPE_CHECKING
 from enum import Enum
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, validator, PositiveInt
+from pydantic import BaseModel, validator, PositiveInt, AfterValidator
 
 if TYPE_CHECKING:
     from dataclasses import dataclass
@@ -23,7 +24,8 @@ from . import logging, util
 logger = logging.get_logger()
 
 # Get physical memory specs
-MEM_GIB = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024.0 ** 3)
+MEM_GIB = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024.0**
+                                                                      3)
 
 DEFAULT_NPROC = max(1, int(multiprocessing.cpu_count()) - 1)
 
@@ -71,12 +73,18 @@ class PrunedDatadir:
 #
 # Order important for downlaod in `setup()`; default should come first.
 CHAIN_REGIONS = {
-    "2021-02": PrunedDatadir(
-        base_datadirs / "pruned-667200", 667_200, "pruned_667200.tar.gz",
+    "2021-02":
+    PrunedDatadir(
+        base_datadirs / "pruned-667200",
+        667_200,
+        "pruned_667200.tar.gz",
         "Pre-taproot, post-segwit",
     ),
-    "2017-12": PrunedDatadir(
-        base_datadirs / "pruned-500k", 500_000, "pruned_500k.tar.gz",
+    "2017-12":
+    PrunedDatadir(
+        base_datadirs / "pruned-500k",
+        500_000,
+        "pruned_500k.tar.gz",
         "A few months before segwit activation",
     ),
 }
@@ -128,9 +136,8 @@ def path_exists(path: Path):
 
 
 def is_built_bitcoin(path: Path):
-    if not (
-        (path / "src" / "bitcoind").exists() and (path / "src" / "bitcoin-cli").exists()
-    ):
+    if not ((path / "src" / "bitcoind").exists() and
+            (path / "src" / "bitcoin-cli").exists()):
         raise ValueError("path doesn't have bitcoin binaries")
     return path
 
@@ -155,12 +162,8 @@ def is_port_open(addr: str) -> str:
         raise ValueError("can't connect to node at {}".format(addr))
 
 
-class NodeAddr(str):
-    """An address:port string pointing to a running bitcoin node."""
-
-    @classmethod
-    def __get_validators__(cls):
-        yield is_port_open
+# An address:port string pointing to a running bitcoin node.
+NodeAddr = Annotated[str, AfterValidator(is_port_open)]
 
 
 def _expandvars(s: str):
@@ -169,31 +172,22 @@ def _expandvars(s: str):
     return s
 
 
-class EnvStr(str):
-    @classmethod
-    def __get_validators__(cls):
-        yield _expandvars
+EnvStr = Annotated[str, AfterValidator(_expandvars)]
 
+ExistingDatadir = Annotated[
+    Path,
+    AfterValidator(is_valid_path),
+    AfterValidator(path_exists),
+    AfterValidator(is_datadir),
+]
 
-class ExistingDatadir(Path):
-    @classmethod
-    def __get_validators__(cls):
-        yield is_valid_path
-        yield path_exists
-        yield is_datadir
+RepoDir = Annotated[
+    Path,
+    AfterValidator(is_valid_path),
+    AfterValidator(path_exists),
+]
 
-
-class RepoDir(Path):
-    @classmethod
-    def __get_validators__(cls):
-        yield is_valid_path
-        yield path_exists
-
-
-class WriteablePath(Path):
-    @classmethod
-    def __get_validators__(cls):
-        yield is_writeable_path
+WriteablePath = Annotated[Path, AfterValidator(is_writeable_path)]
 
 
 class SyncedPeer(BaseModel):
@@ -208,15 +202,14 @@ class SyncedPeer(BaseModel):
 
     # TODO actually use this
     def validate_either_or(self, data):
-        if not (
-            set(data.keys()).issuperset({"datadir", "repodir"}) or "address" in data
-        ):
+        if not (set(data.keys()).issuperset({"datadir", "repodir"})
+                or "address" in data):
             raise ValueError("synced_peer config not valid")
 
     def __hash__(self):
         return hash(
-            str(self.datadir) + str(self.repodir) + str(self.address) + str(self.gitref)
-        )
+            str(self.datadir) + str(self.repodir) + str(self.address) +
+            str(self.gitref))
 
 
 def get_envname():
@@ -286,8 +279,7 @@ class BenchIbdRangeFromLocal(IBDishBench):
         if not v and DEFAULT_REGION.path.exists():
             logger.info(
                 "No src_datadir specified for BenchIbdRangeFromLocal - "
-                f"defaulting to {DEFAULT_REGION.path}."
-            )
+                f"defaulting to {DEFAULT_REGION.path}.")
             return DEFAULT_REGION.path
         return Path(v)
 
@@ -352,8 +344,8 @@ class Target(BaseModel):
     def id(self):
         """A short, human-readable ID."""
         return "{}-{}".format(
-            self.gitref, re.sub(r"\s+", "", self.bitcoind_extra_args).replace("-", "")
-        )
+            self.gitref,
+            re.sub(r"\s+", "", self.bitcoind_extra_args).replace("-", ""))
 
     @validator("name", always=True)
     def make_name(cls, v, values, **kwargs):
@@ -364,15 +356,10 @@ class Target(BaseModel):
     @property
     def _hash_str(self):
         if not self.gitco:
-            raise ValueError("can't generate cache key until git checkout is resolved")
-        return (
-            self.gitco.sha
-            + self.gitremote
-            + self.bitcoind_extra_args
-            + self.name
-            + self.configure_args
-            + str(self.rebase)
-        )
+            raise ValueError(
+                "can't generate cache key until git checkout is resolved")
+        return (self.gitco.sha + self.gitremote + self.bitcoind_extra_args +
+                self.name + self.configure_args + str(self.rebase))
 
     def __hash__(self):
         return hash(self._hash_str)
@@ -409,7 +396,8 @@ class Config(BaseModel):
     @validator("workdir", pre=True, always=True)
     def mk_workdir(cls, v):
         if not v:
-            now = datetime.datetime.utcnow().isoformat().split(".")[0].replace(":", "")
+            now = datetime.datetime.utcnow().isoformat().split(".")[0].replace(
+                ":", "")
             rand = util.sha256(str(random.random()))[:8]
             name = f"{now}-{rand}"
             path = Path(workdir_path / name)
@@ -421,10 +409,8 @@ class Config(BaseModel):
     def check_peer(cls, v, values, **kwargs):
         if v.ibd_from_local or v.ibd_range_from_local:
             if not values.get("synced_peer"):
-                raise ValueError(
-                    "synced_peer must be specified when running "
-                    "IBD- or reindex-based benchmarks"
-                )
+                raise ValueError("synced_peer must be specified when running "
+                                 "IBD- or reindex-based benchmarks")
 
         return v
 
