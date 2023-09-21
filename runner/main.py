@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3
 # vim: ft=python
 """
 Run a series of benchmarks against a particular Bitcoin Core revision(s).

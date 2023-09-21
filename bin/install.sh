@@ -22,28 +22,11 @@ DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -qq -y \
   clang \
   git wget time python3-dev python3-pip curl
 
-if ! which python3.8; then
-  PY_VERSION=3.8.3
-  echo "Installing Python $PY_VERSION"
-  $SUDO apt update -qq
-  $SUDO apt-get install -y -qq \
-    build-essential zlib1g-dev libncurses5-dev libgdbm-dev \
-    libnss3-dev libssl-dev libreadline-dev libffi-dev
-  cd /tmp
-  curl -O https://www.python.org/ftp/python/${PY_VERSION}/Python-${PY_VERSION}.tar.xz
-  tar -xf Python-${PY_VERSION}.tar.xz
-  cd Python-${PY_VERSION}
-  ./configure --enable-optimizations
-  make -j $(nproc)
-  $SUDO make altinstall
-  $SUDO rm -rf /tmp/Python-${PY_VERSION}*
-fi
-
 if ! which fio; then
   echo "Installing fio for IO testing (bitcoinperf-hwinfo)"
   $SUDO apt install -y -qq fio
 fi
 
 if [ -f "./setup.py" ]; then
-  python3.8 -m pip install --user -e .
+  python3 -m pip install --user -e .
 fi

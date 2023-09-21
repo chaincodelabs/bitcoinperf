@@ -9,11 +9,6 @@
 #     (defaults to ./runner/prod.yml)
 #
 
-if ! python3.8 --version >/dev/null; then
-  echo "Need to install Python 3.8"
-  exit 1
-fi
-
 if ! grep bitcoinperf setup.py >/dev/null; then
   echo "Must run from the root of the bitcoinperf directory."
   exit 1

@@ -14,7 +14,7 @@ to report the benchmarks.
 1. Clone this repo: `git clone https://github.com/chaincodelabs/bitcoinperf.git`
 1. Ensure you have Python 3.8 on your system (see `./bin/install.sh`).
 1. Peruse all the other stuff you should have installed in `./bin/install.sh`.
-1. `python3.8 -m pip install --user -e .`
+1. `python3 -m pip install --user -e .`
 1. Follow all setup instructions: `bitcoinperf setup`
 1. Run the bench: `bitcoinperf bench-pr $YOUR_PR_NUM`
   - This will run a comparative initial block download from block 500_000 to
