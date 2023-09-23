@@ -433,7 +433,7 @@ def load(content: t.Union[Path, str]) -> Config:
     if isinstance(content, Path):
         content = content.read_text()
 
-    return Config(**yaml.load(content))
+    return Config(**yaml.load(content, Loader=yaml.Loader))
 
 
 def link_latest_run(conf: Config):
