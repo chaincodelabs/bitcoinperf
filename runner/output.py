@@ -255,7 +255,7 @@ def print_comparative_times_table(runs: GroupedRuns, config=None, pfile=sys.stdo
     writer = pytablewriter.MarkdownTableWriter()
     vs_str = ("{}" + (" vs. {}" * (len(runs.target_names) - 1))).format(
         *runs.target_names)
-    writer.header_list = ["bench name", "x", *runs.target_names]
+    writer.headers = ["bench name", "x", *runs.target_names]
     writer.value_matrix = []
     writer.margin = 1
     writer.stream = pfile
@@ -269,7 +269,7 @@ def print_comparative_times_table(runs: GroupedRuns, config=None, pfile=sys.stdo
                 list(target_to_benchlist.items())[0][1].command)
 
     cmd_writer = pytablewriter.MarkdownTableWriter()
-    cmd_writer.header_list = ["bench name", "command"]
+    cmd_writer.headers = ["bench name", "command"]
     cmd_writer.value_matrix = []
     cmd_writer.margin = 1
     cmd_writer.stream = pfile
