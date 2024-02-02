@@ -542,7 +542,7 @@ def die(*args, **kwargs):
 def bench_pr(
     pr_num: str,
     run_id: str = None,
-    peer_tag: str = "v22.0rc2",
+    peer_tag: str = "v26.0",
     peer_address: str = None,
     num_blocks: int = 1_000,
     run_count: int = 2,
