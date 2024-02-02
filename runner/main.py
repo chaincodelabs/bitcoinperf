@@ -3,8 +3,6 @@
 """
 Run a series of benchmarks against a particular Bitcoin Core revision(s).
 
-See bin/runlocal.sh for a sample invocation.
-
 """
 import atexit
 import os
@@ -39,7 +37,7 @@ from .logging import get_logger
 
 logger = get_logger()
 
-assert sys.version_info >= (3, 8), "Python 3.8 required"
+assert sys.version_info >= (3, 8), "Python >=3.8 required"
 
 # Maintain a lockfile that is global across the host to ensure that we're not
 # running more than one instance on a given system.
@@ -64,7 +62,7 @@ def _startup_assertions(cfg):
         == 0
     ):
         warn(
-            "benchmarks shouldn't run concurrently with unrelated bitcoin " "processes"
+            "benchmarks shouldn't run concurrently with unrelated bitcoin processes"
         )
 
     if cfg.safety_checks:

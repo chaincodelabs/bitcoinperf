@@ -241,10 +241,11 @@ class Node:
                              self, call)
             return None
 
-        if not deserialize_output:
-            logger.debug("rpc: %r -> %r", cmd, call.stdout)
-        else:
-            logger.debug("response for %r:\n%s", cmd, json.loads(call.stdout))
+        if config.BITCOINPERF_TRACE:
+            if not deserialize_output:
+                logger.debug("rpc: %r -> %r", cmd, call.stdout)
+            else:
+                logger.debug("response for %r:\n%s", cmd, json.loads(call.stdout))
 
         return json.loads(call.stdout) if deserialize_output else None
 

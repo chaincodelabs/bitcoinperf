@@ -24,8 +24,10 @@ from . import logging, util
 logger = logging.get_logger()
 
 # Get physical memory specs
-MEM_GIB = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024.0**
-                                                                      3)
+MEM_GIB = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024.0**3)
+
+# If set, do extremely granular logging of RPC calls.
+LOG_TRACE = bool(os.environ.get('BITCOINPERF_TRACE'))
 
 DEFAULT_NPROC = max(1, int(multiprocessing.cpu_count()) - 1)
 
