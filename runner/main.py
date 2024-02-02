@@ -633,6 +633,11 @@ def bench_pr(
     if bad_targets:
         print(f"failed to find commit for {[t.gitref for t in bad_targets]}")
         sys.exit(1)
+    elif len(set([co.sha for co in checkouts])) == 1:
+        # Don't do the run if we're comparing a commit to itself.
+        print("benchmarking a commit against itself - quitting")
+        sys.exit(1)
+
 
     # This is hardcoded per the preexisting datadir.
     start_height = pruned_datadir.height
